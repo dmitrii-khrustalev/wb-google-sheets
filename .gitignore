@@ -1,0 +1,11 @@
+# Локальные заметки и секреты
+.env
+*.env
+credentials.json
+.clasp.json
+
+# OS / IDE
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
