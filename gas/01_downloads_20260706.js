@@ -5116,18 +5116,18 @@ function recordLkStocks() {
   var created = wrFetchJson_(token, createUrl);
   Logger.log('create HTTP ' + created.code + ' ' + String(created.text || '').substring(0, 400));
   if (created.code === 429) {
-    showAlert('WB лимит: 1 создание отчёта в минуту. Подождите минуту и запустите ещё раз.');
+    lkStocksFail_('WB лимит: 1 создание отчёта в минуту. Подождите минуту и запустите ещё раз.');
     return;
   }
   if (created.code !== 200) {
-    showAlert('Не удалось создать отчёт: HTTP ' + created.code + '\n' + String(created.text || '').substring(0, 300));
+    lkStocksFail_('Не удалось создать отчёт: HTTP ' + created.code + '\n' + String(created.text || '').substring(0, 300));
     return;
   }
 
   var taskId = created.data && created.data.data && created.data.data.taskId;
   if (!taskId && created.data && created.data.taskId) taskId = created.data.taskId;
   if (!taskId) {
-    showAlert('В ответе нет taskId:\n' + String(created.text || '').substring(0, 400));
+    lkStocksFail_('В ответе нет taskId:\n' + String(created.text || '').substring(0, 400));
     return;
   }
   Logger.log('taskId ' + taskId);
@@ -5147,30 +5147,30 @@ function recordLkStocks() {
     }
     if (String(status).toLowerCase() === 'done') break;
     if (/error|fail|cancel/i.test(status)) {
-      showAlert('Отчёт не собрался, статус: ' + status);
+      lkStocksFail_('Отчёт не собрался, статус: ' + status);
       return;
     }
   }
   if (String(status).toLowerCase() !== 'done') {
-    showAlert('Отчёт ещё не готов (статус: ' + (status || 'пусто') + '). Запустите «Остатки ЛК» позже.');
+    lkStocksFail_('Отчёт ещё не готов (статус: ' + (status || 'пусто') + '). Запустите «Остатки ЛК» позже.');
     return;
   }
 
   var dl = wrFetchJson_(token, host + '/api/v1/warehouse_remains/tasks/' + encodeURIComponent(taskId) + '/download');
   Logger.log('download HTTP ' + dl.code + ' bytes ' + String(dl.text || '').length);
   if (dl.code === 204 || !dl.text) {
-    showAlert('Отчёт пустой (HTTP ' + dl.code + ')');
+    lkStocksFail_('Отчёт пустой (HTTP ' + dl.code + ')');
     return;
   }
   if (dl.code !== 200) {
-    showAlert('Скачать отчёт не удалось: HTTP ' + dl.code + '\n' + String(dl.text || '').substring(0, 300));
+    lkStocksFail_('Скачать отчёт не удалось: HTTP ' + dl.code + '\n' + String(dl.text || '').substring(0, 300));
     return;
   }
 
   var rowsJson = dl.data;
   if (rowsJson && !Array.isArray(rowsJson) && Array.isArray(rowsJson.data)) rowsJson = rowsJson.data;
   if (!Array.isArray(rowsJson) || !rowsJson.length) {
-    showAlert('В отчёте нет строк. Ответ:\n' + String(dl.text || '').substring(0, 400));
+    lkStocksFail_('В отчёте нет строк. Ответ:\n' + String(dl.text || '').substring(0, 400));
     return;
   }
 
@@ -5184,6 +5184,12 @@ function recordLkStocks() {
     'Повтор за сегодня перезаписывает только эту дату.' +
     (written.oldLeft ? '\n\nСтарый лист «Остатки_ЛК_проба» не трогал.' : '')
   );
+}
+
+function lkStocksFail_(msg) {
+  Logger.log(msg);
+  if (isRunningFromTrigger()) throw new Error(msg);
+  showAlert(msg);
 }
 
 var LK_STOCKS_SHEET_ = 'Остатки ЛК';
@@ -6568,12 +6574,12 @@ function updateAllReports2() {
   var token;
   try { token = getApiToken(); } catch (eTok) { token = ''; }
   if (typeof morningTgPendingList_ === 'function') {
-    morningTgPendingList_(['Товары', 'История цен', 'Остатки', 'В пути', 'Поставки']);
+    morningTgPendingList_(['Товары', 'История цен', 'Остатки', 'Остатки ЛК', 'В пути', 'Поставки']);
   }
   if (!token) {
     lines.push('❌ Токен WB не найден');
     if (typeof morningTgFailList_ === 'function') {
-      morningTgFailList_(['Товары', 'История цен', 'Остатки', 'В пути', 'Поставки'], 'нет токена');
+      morningTgFailList_(['Товары', 'История цен', 'Остатки', 'Остатки ЛК', 'В пути', 'Поставки'], 'нет токена');
     }
     tgSendJob_('updateAllReports2', false, lines, t0);
     return;
@@ -6607,6 +6613,13 @@ function updateAllReports2() {
       });
     });
     Utilities.sleep(3000);
+
+    tgRunStep_(lines, 'Остатки ЛК', function() {
+      tgWatch_(lines, 'Остатки ЛК', function() {
+        recordLkStocks();
+      });
+    });
+    Utilities.sleep(2000);
 
     tgRunStep_(lines, 'В пути', function() {
       tgWatch_(lines, 'В пути', function() {
@@ -6883,7 +6896,7 @@ function updateAllReports3() {
 
 var MORNING_TG_STEPS_ = [
   'Финансы', 'Реклама', 'Воронка', 'Заказы',
-  'Товары', 'Остатки', 'В пути', 'Поставки',
+  'Товары', 'История цен', 'Остатки', 'Остатки ЛК', 'В пути', 'Поставки',
   'Статусы FBW',
   'FBS заказы', 'FBS поставки', 'FBS остатки',
   'Сборка FBS',
@@ -6900,7 +6913,9 @@ var MORNING_TG_NAME_ = {
   'Аналитика_проба_дни': 'Воронка',
   'Заказы': 'Заказы',
   'Товары': 'Товары',
+  'История цен': 'История цен',
   'Остатки': 'Остатки',
+  'Остатки ЛК': 'Остатки ЛК',
   'В пути': 'В пути',
   'Поставки': 'Поставки',
   'Поставки_список': 'Поставки',
@@ -7048,6 +7063,7 @@ function morningChainJobTimeoutMs_(jobId) {
     orders: 10 * 60 * 1000,
     products: 12 * 60 * 1000,
     fbwStocks: 22 * 60 * 1000,
+    lkStocks: 12 * 60 * 1000,
     transit: 10 * 60 * 1000,
     supplies: 22 * 60 * 1000,
     fbsOrders: 15 * 60 * 1000,
@@ -7121,6 +7137,7 @@ var MORNING_CHAIN_JOBS_ = [
   { id: 'orders', tg: 'Заказы' },
   { id: 'products', tg: 'Товары' },
   { id: 'fbwStocks', tg: 'Остатки' },
+  { id: 'lkStocks', tg: 'Остатки ЛК' },
   { id: 'transit', tg: 'В пути' },
   { id: 'supplies', tg: 'Поставки', next: 'waitStatuses' },
   { id: 'fbsOrders', tg: 'FBS заказы' },
@@ -7271,6 +7288,7 @@ function morningChainRunJob_(id) {
     else if (id === 'orders') morningJobOrders_();
     else if (id === 'products') morningJobProducts_();
     else if (id === 'fbwStocks') morningJobFbwStocks_();
+    else if (id === 'lkStocks') morningJobLkStocks_();
     else if (id === 'transit') morningJobTransit_();
     else if (id === 'supplies') morningJobSupplies_();
     else if (id === 'fbsOrders') morningJobFbsOrders_();
@@ -7342,7 +7360,11 @@ function morningJobOrders_() {
 }
 
 function morningJobProducts_() {
-  if (!morningJobToken_()) { morningTgNote_(false, 'Товары', 'нет токена'); return; }
+  if (!morningJobToken_()) {
+    morningTgNote_(false, 'Товары', 'нет токена');
+    morningTgNote_(false, 'История цен', 'нет токена');
+    return;
+  }
   morningChainClearSheetFilter_('Товары');
   var lines = [];
   tgRunStep_(lines, 'Товары', function() {
@@ -7354,6 +7376,17 @@ function morningJobProducts_() {
   tgRunStep_(lines, 'История цен', function() {
     tgWatch_(lines, 'История цен', function() {
       savePriceHistory();
+    });
+  });
+}
+
+function morningJobLkStocks_() {
+  if (!morningJobToken_()) { morningTgNote_(false, 'Остатки ЛК', 'нет токена'); return; }
+  morningChainClearSheetFilter_('Остатки ЛК');
+  var lines = [];
+  tgRunStep_(lines, 'Остатки ЛК', function() {
+    tgWatch_(lines, 'Остатки ЛК', function() {
+      recordLkStocks();
     });
   });
 }
