@@ -158,6 +158,16 @@ function runFbsStocksJob_() {
   if (typeof clearTriggersForHandler_ === 'function') {
     clearTriggersForHandler_('runFbsStocksJob_');
   }
+  if (typeof morningChainSheetLockOrReschedule_ === 'function') {
+    if (!morningChainSheetLockOrReschedule_('runFbsStocksJob_', 45 * 1000, function() {
+      runFbsStocksJobCore_();
+    })) return;
+    return;
+  }
+  runFbsStocksJobCore_();
+}
+
+function runFbsStocksJobCore_() {
   var t0 = Date.now();
   var lines = [];
   WB_SILENT_UI = true;
@@ -205,6 +215,16 @@ function runComposeFbsJob_() {
   if (typeof clearTriggersForHandler_ === 'function') {
     clearTriggersForHandler_('runComposeFbsJob_');
   }
+  if (typeof morningChainSheetLockOrReschedule_ === 'function') {
+    if (!morningChainSheetLockOrReschedule_('runComposeFbsJob_', 45 * 1000, function() {
+      runComposeFbsJobCore_();
+    })) return;
+    return;
+  }
+  runComposeFbsJobCore_();
+}
+
+function runComposeFbsJobCore_() {
   WB_SILENT_UI = true;
   var props = PropertiesService.getScriptProperties();
   props.setProperty('WB_FBS_COMPOSE_BUSY', '1');
