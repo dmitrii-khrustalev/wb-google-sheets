@@ -16,6 +16,7 @@ function onOpen() {
       .addItem('📈 Воронка продаж', 'probeSalesFunnel')
       .addItem('📦 Заказы', 'showOrdersDialog')
       .addItem('📦 Товары', 'loadAllProducts')
+      .addItem('💵 История цен', 'savePriceHistory')
       .addItem('📦 Остатки', 'recordStocksFast')
       .addItem('📦 Остатки ЛК', 'recordLkStocks')
       .addItem('📦 Выгрузка FBS', 'showFbsExportDialog')
@@ -275,6 +276,7 @@ function showFinanceReportDialog() {
     'input,select{width:100%;padding:6px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px}' +
     'button{background:#4CAF50;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px}' +
     'button:hover{background:#45a049}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '.info{background:#e3f2fd;padding:8px;margin:10px 0;border-radius:4px;font-size:11px}' +
     '</style></head><body>' +
     '<h3 style="margin-top:0">💰 Финансовый отчёт</h3>' +
@@ -286,14 +288,17 @@ function showFinanceReportDialog() {
     '<option value="daily">📅 Ежедневный</option>' +
     '<option value="weekly">📊 Еженедельный</option>' +
     '</select>' +
-    '<button onclick="loadReport()">📥 Загрузить отчёт</button>' +
+    '<button id="btn" onclick="loadReport()">📥 Загрузить отчёт</button>' +
     '<script>' +
     'function loadReport(){' +
     'var d1=document.getElementById("dateFrom").value;' +
     'var d2=document.getElementById("dateTo").value;' +
     'var period=document.getElementById("periodType").value;' +
     'if(!d1||!d2){alert("Выберите даты!");return;}' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close()}).runFinanceReport(d1,d2,period);' +
+    'var btn=document.getElementById("btn"); btn.disabled=true;' +
+    'google.script.run.withSuccessHandler(function(){google.script.host.close()})' +
+    '.withFailureHandler(function(e){btn.disabled=false;alert(e);})' +
+    '.runFinanceReport(d1,d2,period);' +
     '}' +
     '</script></body></html>';
   
@@ -309,17 +314,21 @@ function showAdvDialog() {
     'input{width:100%;padding:6px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px}' +
     'button{background:#4CAF50;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px}' +
     'button:hover{background:#45a049}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '</style></head><body>' +
     '<h3 style="margin-top:0">📢 Рекламные расходы</h3>' +
     '<label>Дата ОТ:</label><input type="date" id="dateFrom">' +
     '<label>Дата ДО:</label><input type="date" id="dateTo">' +
-    '<button onclick="loadReport()">📥 Загрузить отчёт</button>' +
+    '<button id="btn" onclick="loadReport()">📥 Загрузить отчёт</button>' +
     '<script>' +
     'function loadReport(){' +
     'var d1=document.getElementById("dateFrom").value;' +
     'var d2=document.getElementById("dateTo").value;' +
     'if(!d1||!d2){alert("Выберите даты!");return;}' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close()}).runAdvReport(d1,d2);' +
+    'var btn=document.getElementById("btn"); btn.disabled=true;' +
+    'google.script.run.withSuccessHandler(function(){google.script.host.close()})' +
+    '.withFailureHandler(function(e){btn.disabled=false;alert(e);})' +
+    '.runAdvReport(d1,d2);' +
     '}' +
     '</script></body></html>';
   
@@ -335,6 +344,7 @@ function showFbsExportDialog() {
     '.row label{cursor:pointer}' +
     'button{background:#4CAF50;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px;margin-top:8px}' +
     'button:hover{background:#45a049}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '.info{background:#e3f2fd;padding:8px;margin:0 0 10px;border-radius:4px;font-size:11px}' +
     '</style></head><body>' +
     '<h3>📦 Выгрузка FBS</h3>' +
@@ -342,12 +352,14 @@ function showFbsExportDialog() {
     '<div class="row"><label><input type="checkbox" id="orders" checked> Заказы</label></div>' +
     '<div class="row"><label><input type="checkbox" id="supplies" checked> Поставки</label></div>' +
     '<div class="row"><label><input type="checkbox" id="stocks" checked> Остатки</label></div>' +
-    '<button onclick="go()">📥 Выгрузить</button>' +
+    '<button id="btn" onclick="go()">📥 Выгрузить</button>' +
     '<script>' +
     'function go(){' +
     'var sel={orders:document.getElementById("orders").checked,supplies:document.getElementById("supplies").checked,stocks:document.getElementById("stocks").checked};' +
     'if(!sel.orders&&!sel.supplies&&!sel.stocks){alert("Выберите хотя бы один пункт");return;}' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close()}).withFailureHandler(function(e){alert(e);}).runFbsExport(sel);' +
+    'var btn=document.getElementById("btn"); btn.disabled=true;' +
+    'google.script.run.withSuccessHandler(function(){google.script.host.close()})' +
+    '.withFailureHandler(function(e){btn.disabled=false;alert(e);}).runFbsExport(sel);' +
     '}' +
     '</script></body></html>';
   var dialog = HtmlService.createHtmlOutput(html).setWidth(400).setHeight(300);
@@ -1256,7 +1268,7 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
                   'date': day.date,
                   'appType': app.appType,
                   'nmId': nm.nmId,
-                  'name': nm.name,
+                  'name': nm.name || nm.nmName || nm.title || '',
                   'views': nm.views || 0,
                   'clicks': nm.clicks || 0,
                   'sum': (nm.sum || 0) / 100,
@@ -1315,19 +1327,28 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
   // ДОБАВЛЯЕМ ТРИ НОВЫХ ПОЛЯ В КОНЕЦ
   // ============================================
   
-  // Получаем артикулы с листа "Товары"
+  // Артикул и название с листа «Товары».
+  // fullstats больше не отдаёт nm.name — без каталога столбец «Название» пустой.
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var productsSheet = ss.getSheetByName('Товары');
   var nmIdToArticle = {};
+  var nmIdToName = {};
   
-  if (productsSheet) {
+  if (productsSheet && productsSheet.getLastRow() > 1) {
     var productsData = productsSheet.getDataRange().getValues();
+    var pHeaders = productsData[0];
+    var nmCol = typeof wbColIdx_ === 'function' ? wbColIdx_(pHeaders, ['Артикул WB', 'nmId']) : 0;
+    var nameCol = typeof wbColIdx_ === 'function' ? wbColIdx_(pHeaders, ['Название', 'name', 'title']) : 1;
+    var artCol = typeof wbColIdx_ === 'function' ? wbColIdx_(pHeaders, ['Ваш артикул', 'Арт. продавца', 'vendorCode']) : 2;
+    if (nmCol < 0) nmCol = 0;
+    if (nameCol < 0) nameCol = 1;
+    if (artCol < 0) artCol = 2;
     for (var i = 1; i < productsData.length; i++) {
-      var nmIdVal = productsData[i][0];  // столбец A - nmId
-      var articleVal = productsData[i][2]; // столбец C - артикул
-      if (nmIdVal) {
-        nmIdToArticle[nmIdVal.toString()] = articleVal || '';
-      }
+      var nmIdVal = productsData[i][nmCol];
+      if (!nmIdVal) continue;
+      var nmKey = nmIdVal.toString();
+      nmIdToArticle[nmKey] = productsData[i][artCol] || '';
+      if (productsData[i][nameCol]) nmIdToName[nmKey] = String(productsData[i][nameCol]);
     }
   }
   
@@ -1335,9 +1356,12 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
   for (var i = 0; i < allStats.length; i++) {
     var nmIdStr = allStats[i].nmId ? allStats[i].nmId.toString() : '';
     
-    allStats[i].article = nmIdToArticle[nmIdStr] || '';                      // Артикул
-    allStats[i].dateFormatted = formatDate(allStats[i].date);                // Дата в формате DD.MM.YYYY
-    allStats[i].advCost = (allStats[i].clicks || 0) * (allStats[i].cpc || 0); // Расходы рекламы
+    allStats[i].article = nmIdToArticle[nmIdStr] || '';
+    if (!allStats[i].name && nmIdStr && nmIdToName[nmIdStr]) {
+      allStats[i].name = nmIdToName[nmIdStr];
+    }
+    allStats[i].dateFormatted = formatDate(allStats[i].date);
+    allStats[i].advCost = (allStats[i].clicks || 0) * (allStats[i].cpc || 0);
   }
   
   // Формируем итоговый массив (原有 столбцы + 3 новых в конце)
@@ -1415,11 +1439,14 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
     }
   }
   
+  var filledNames = adsFillEmptyNames_(sheet, nmIdToName);
   if (newStats.length === 0) {
     if (!isRunningFromTrigger()) {
-      SpreadsheetApp.getUi().alert('⚠️ Новых рекламных записей не найдено');
+      SpreadsheetApp.getUi().alert(filledNames
+        ? '⚠️ Новых записей нет. Пустые названия заполнены: ' + filledNames
+        : '⚠️ Новых рекламных записей не найдено');
     }
-    Logger.log('Новых рекламных записей нет');
+    Logger.log('Новых рекламных записей нет, названия заполнены: ' + filledNames);
     wbPutSheetFilter_(sheet);
     return;
   }
@@ -1456,10 +1483,38 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
   }
   
   if (!isRunningFromTrigger()) {
-    SpreadsheetApp.getUi().alert('✅ Добавлено ' + newStats.length + ' новых записей');
+    var msg = '✅ Добавлено ' + newStats.length + ' новых записей';
+    if (filledNames) msg += '\nПустые названия заполнены: ' + filledNames;
+    SpreadsheetApp.getUi().alert(msg);
   }
-  Logger.log('Добавлено новых рекламных записей: ' + newStats.length);
+  Logger.log('Добавлено новых рекламных записей: ' + newStats.length + ', названия: ' + filledNames);
   wbPutSheetFilter_(sheet);
+}
+
+/** Уже записанные строки, где fullstats пришёл без названия. */
+function adsFillEmptyNames_(sheet, nmIdToName) {
+  if (!sheet || sheet.getLastRow() < 2 || !nmIdToName) return 0;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var nameIdx = typeof wbColIdx_ === 'function' ? wbColIdx_(headers, ['Название', 'name']) : headers.indexOf('Название');
+  var nmIdx = typeof wbColIdx_ === 'function' ? wbColIdx_(headers, ['Артикул WB', 'nmId']) : headers.indexOf('Артикул WB');
+  if (nameIdx < 0 || nmIdx < 0) return 0;
+  var n = sheet.getLastRow() - 1;
+  var names = sheet.getRange(2, nameIdx + 1, n, 1).getValues();
+  var nms = sheet.getRange(2, nmIdx + 1, n, 1).getValues();
+  var changed = false;
+  var count = 0;
+  var i, nm, title;
+  for (i = 0; i < names.length; i++) {
+    if (String(names[i][0] || '').trim()) continue;
+    nm = nms[i][0] != null ? String(nms[i][0]).trim() : '';
+    title = nm && nmIdToName[nm];
+    if (!title) continue;
+    names[i][0] = title;
+    changed = true;
+    count++;
+  }
+  if (changed) sheet.getRange(2, nameIdx + 1, n, 1).setValues(names);
+  return count;
 }
 
 
@@ -1726,6 +1781,257 @@ function saveProductsWithPricesToSheet(products, priceMap) {
   wbPutSheetFilter_(sheet);
 }
 
+// ============================================
+// История цен: дневной снимок каталога.
+// Тот же источник, что product_prices_daily в Supabase:
+// GET discounts-prices-api /api/v2/list/goods/filter, одна строка на nm × день (МСК).
+// Повтор за сегодня заменяет только этот день. Проба uploadID — отдельный лист.
+// ============================================
+
+var PRICE_HISTORY_SHEET_ = 'История цен';
+var PRICE_HISTORY_HEADERS_ = [
+  'Дата', 'Артикул WB', 'Арт. продавца', 'Название',
+  'Цена, ₽', 'Цена со скидкой, ₽', 'Цена клуба, ₽',
+  'Скидка прод. %', 'Валюта'
+];
+
+function savePriceHistory() {
+  var token = getApiToken();
+  if (!token) {
+    if (!isRunningFromTrigger()) showAlert('⚠️ Токен не найден');
+    Logger.log('История цен: нет токена');
+    return { rows: 0 };
+  }
+
+  var goods = fetchWbListGoods_(token);
+  var productsDict = getProductsDictionary();
+  var dateStr = Utilities.formatDate(new Date(), sheetTimeZone_(), 'yyyy-MM-dd');
+  var rows = [];
+  var i;
+  for (i = 0; i < goods.length; i++) {
+    var row = priceHistoryRow_(goods[i], dateStr, productsDict);
+    if (row) rows.push(row);
+  }
+  rows.sort(function(a, b) {
+    var na = Number(a[1]);
+    var nb = Number(b[1]);
+    if (na !== nb) return na - nb;
+    return String(a[1]).localeCompare(String(b[1]));
+  });
+
+  var written = writePriceHistory_(dateStr, rows);
+  Logger.log('История цен: ' + written.rows + ' строк за ' + dateStr + ', снято повтор ' + written.removed);
+  if (!isRunningFromTrigger()) {
+    showAlert(
+      '✅ История цен\n' +
+      'Дата: ' + Utilities.formatDate(lkStocksDate_(dateStr), sheetTimeZone_(), 'dd.MM.yyyy') + '\n' +
+      'Товаров: ' + written.rows + '\n' +
+      'Лист: ' + PRICE_HISTORY_SHEET_ + '\n\n' +
+      'Повтор за сегодня перезаписывает только эту дату.'
+    );
+  }
+  return written;
+}
+
+function fetchWbListGoods_(token) {
+  var host = 'https://discounts-prices-api.wildberries.ru';
+  var goods = [];
+  var offset = 0;
+  var limit = 1000;
+  var page;
+  var retries = 0;
+  for (page = 0; page < 50; page++) {
+    var res = wrFetchJson_(token, host + '/api/v2/list/goods/filter?limit=' + limit + '&offset=' + offset, 'GET');
+    if (res.code === 429) {
+      retries++;
+      if (retries > 5) throw new Error('WB лимит цен (429). Подождите минуту и повторите.');
+      Logger.log('История цен: 429, пауза');
+      Utilities.sleep(6000);
+      page--;
+      continue;
+    }
+    retries = 0;
+    if (res.code === 403) {
+      throw new Error('HTTP 403 — нужен токен с категорией «Цены и скидки».');
+    }
+    if (res.code !== 200) {
+      throw new Error('Цены HTTP ' + res.code + ' — ' + String(res.text || '').substring(0, 200));
+    }
+    var data = (res.data && res.data.data) ? res.data.data : (res.data || {});
+    var chunk = data.listGoods || [];
+    if (!chunk.length) break;
+    goods = goods.concat(chunk);
+    if (chunk.length < limit) break;
+    offset += limit;
+    Utilities.sleep(600);
+  }
+  return goods;
+}
+
+function priceHistoryRow_(item, dateStr, productsDict) {
+  item = item || {};
+  var nmId = item.nmID != null ? item.nmID : item.nmId;
+  if (nmId == null || nmId === '') return null;
+  var sizes = item.sizes || [];
+  var size0 = sizes.length ? sizes[0] : {};
+  var price = priceHistoryNum_(size0.price);
+  var discounted = priceHistoryNum_(size0.discountedPrice);
+  var club = priceHistoryNum_(size0.clubDiscountedPrice);
+  var discount = '';
+  if (price && discounted) {
+    discount = Math.round((1 - discounted / price) * 100);
+  }
+  var product = lkProduct_(productsDict, nmId);
+  var vendor = item.vendorCode != null ? String(item.vendorCode) : '';
+  if (!vendor && product.vendorCode) vendor = String(product.vendorCode);
+  return [
+    lkStocksDate_(dateStr),
+    nmId,
+    vendor,
+    product.title || '',
+    price === null ? '' : price,
+    discounted === null ? '' : discounted,
+    club === null ? '' : club,
+    discount,
+    item.currencyIsoCode4217 || 'RUB'
+  ];
+}
+
+function priceHistoryNum_(v) {
+  if (v === undefined || v === null || v === '') return null;
+  var n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
+function writePriceHistory_(dateStr, rows) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(PRICE_HISTORY_SHEET_);
+  if (!sheet) sheet = ss.insertSheet(PRICE_HISTORY_SHEET_);
+  if (typeof wbClearFilter_ === 'function') wbClearFilter_(sheet);
+
+  var headers = PRICE_HISTORY_HEADERS_;
+  priceHistoryMigrate_(sheet);
+
+  var removed = stocksRemoveDate_(sheet, headers, dateStr);
+  if (rows.length) {
+    var startRow = sheet.getLastRow() + 1;
+    var b, batch;
+    for (b = 0; b < rows.length; b += 1000) {
+      batch = rows.slice(b, b + 1000);
+      sheet.getRange(startRow + b, 1, batch.length, headers.length).setValues(batch);
+    }
+  }
+  priceHistoryFormat_(sheet);
+  wbPutSheetFilter_(sheet);
+  return { rows: rows.length, removed: removed };
+}
+
+function priceHistoryHeadersMatch_(sheet) {
+  var headers = PRICE_HISTORY_HEADERS_;
+  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < headers.length) return false;
+  var current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  var h;
+  for (h = 0; h < headers.length; h++) {
+    if (String(current[h] || '').trim() !== headers[h]) return false;
+  }
+  if (sheet.getLastColumn() > headers.length) {
+    var extra = String(sheet.getRange(1, headers.length + 1).getValue() || '').trim();
+    if (extra) return false;
+  }
+  return true;
+}
+
+/** Старый лист: «Дата цены» и столбец «Загружено». Данные сохраняются. */
+function priceHistoryMigrate_(sheet) {
+  var headers = PRICE_HISTORY_HEADERS_;
+  if (priceHistoryHeadersMatch_(sheet)) return;
+  var lastRow = Math.max(sheet.getLastRow(), 1);
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var head = [];
+  var h;
+  for (h = 0; h < data[0].length; h++) head.push(String(data[0][h] || '').trim());
+  function col(names) {
+    var n, i;
+    for (n = 0; n < names.length; n++) {
+      i = head.indexOf(names[n]);
+      if (i >= 0) return i;
+    }
+    return -1;
+  }
+  var map = [
+    col(['Дата', 'Дата цены']),
+    col(['Артикул WB']),
+    col(['Арт. продавца', 'Артикул продавца']),
+    col(['Название']),
+    col(['Цена, ₽', 'Цена']),
+    col(['Цена со скидкой, ₽']),
+    col(['Цена клуба, ₽', 'Цена WB Клуба, ₽']),
+    col(['Скидка прод. %', 'Скидка %']),
+    col(['Валюта'])
+  ];
+  var out = [headers];
+  var r, c, v, row, empty;
+  for (r = 1; r < data.length; r++) {
+    row = [];
+    empty = true;
+    for (c = 0; c < map.length; c++) {
+      v = map[c] >= 0 ? data[r][map[c]] : '';
+      if (c === 0 && v !== '' && v != null) v = lkStocksDate_(v);
+      if (v !== '' && v != null) empty = false;
+      row.push(v == null ? '' : v);
+    }
+    if (!empty) out.push(row);
+  }
+  sheet.clear();
+  sheet.getRange(1, 1, out.length, headers.length).setValues(out);
+}
+
+function priceHistoryFormat_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1) return;
+  var headers = PRICE_HISTORY_HEADERS_;
+  var lastRow = sheet.getLastRow();
+  var header = sheet.getRange(1, 1, 1, headers.length);
+  header.setFontFamily('Arial').setFontSize(10).setFontWeight('bold').setBackground('#ffffff');
+  stocksSafeFreezeRows_(sheet, 1);
+  sheet.setColumnWidth(1, 90);
+  if (lastRow < 2) return;
+  sheet.getRange(2, 1, lastRow - 1, headers.length).setFontFamily('Arial').setFontSize(10);
+  var dates = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var i;
+  for (i = 0; i < dates.length; i++) dates[i][0] = lkStocksDate_(dates[i][0]);
+  var dateRange = sheet.getRange(2, 1, lastRow - 1, 1);
+  dateRange.setValues(dates);
+  dateRange.setNumberFormat('dd.mm.yyyy');
+  var priceCol = headers.indexOf('Цена, ₽') + 1;
+  var discCol = headers.indexOf('Скидка прод. %') + 1;
+  if (priceCol > 0) sheet.getRange(2, priceCol, lastRow - 1, 3).setNumberFormat('#,##0.00');
+  if (discCol > 0) sheet.getRange(2, discCol, lastRow - 1, 1).setNumberFormat('0');
+  priceHistoryFillTitles_(sheet);
+}
+
+function priceHistoryFillTitles_(sheet) {
+  var headers = PRICE_HISTORY_HEADERS_;
+  var nmCol = headers.indexOf('Артикул WB') + 1;
+  var titleCol = headers.indexOf('Название') + 1;
+  if (nmCol < 1 || titleCol < 1 || sheet.getLastRow() < 2) return;
+  var n = sheet.getLastRow() - 1;
+  var nms = sheet.getRange(2, nmCol, n, 1).getValues();
+  var titles = sheet.getRange(2, titleCol, n, 1).getValues();
+  var dict = getProductsDictionary();
+  var changed = false;
+  var i, title, product;
+  for (i = 0; i < titles.length; i++) {
+    title = String(titles[i][0] || '').trim();
+    if (title) continue;
+    product = lkProduct_(dict, nms[i][0]);
+    if (!product.title) continue;
+    titles[i][0] = product.title;
+    changed = true;
+  }
+  if (changed) sheet.getRange(2, titleCol, n, 1).setValues(titles);
+}
+
 // Функция для тестирования API цен (для отладки)
 function testPricesAPI() {
   var token = getApiToken();
@@ -1769,17 +2075,21 @@ function showWeekPicker() {
     'label{display:block;font-weight:bold;margin-bottom:5px}' +
     'input{width:100%;padding:6px;margin-bottom:15px}' +
     'button{background:#4CAF50;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;width:100%}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '.info{background:#e3f2fd;padding:8px;margin-bottom:10px;border-radius:4px;font-size:11px}' +
     '</style></head><body>' +
     '<h3 style="margin-top:0">📈 Еженедельная динамика</h3>' +
     '<div class="info">📌 Выберите любой день недели</div>' +
     '<label>Выберите дату:</label><input type="date" id="selectedDate">' +
-    '<button onclick="loadDynamics()">📊 Сформировать</button>' +
+    '<button id="btn" onclick="loadDynamics()">📊 Сформировать</button>' +
     '<script>' +
     'function loadDynamics(){' +
     'var d=document.getElementById("selectedDate").value;' +
     'if(!d){alert("Выберите дату!");return;}' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close()}).calculateWeeklyDynamics(d);' +
+    'var btn=document.getElementById("btn"); btn.disabled=true;' +
+    'google.script.run.withSuccessHandler(function(){google.script.host.close()})' +
+    '.withFailureHandler(function(e){btn.disabled=false;alert(e);})' +
+    '.calculateWeeklyDynamics(d);' +
     '}' +
     '</script></body></html>';
   
@@ -2190,17 +2500,21 @@ function showOrdersDialog() {
     'label{display:block;margin:8px 0 4px;font-weight:bold}' +
     'input{width:100%;padding:6px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px}' +
     'button{background:#4CAF50;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '</style></head><body>' +
     '<h3 style="margin-top:0">📦 Загрузка заказов за период</h3>' +
     '<label>Дата ОТ:</label><input type="date" id="dateFrom" value="2026-04-01">' +
     '<label>Дата ДО:</label><input type="date" id="dateTo" value="2026-04-01">' +
-    '<button onclick="loadOrders()">📥 Загрузить</button>' +
+    '<button id="btn" onclick="loadOrders()">📥 Загрузить</button>' +
     '<script>' +
     'function loadOrders(){' +
     'var d1=document.getElementById("dateFrom").value;' +
     'var d2=document.getElementById("dateTo").value;' +
     'if(!d1||!d2){alert("Выберите даты!");return;}' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close()}).loadOrdersRangeManual(d1,d2);' +
+    'var btn=document.getElementById("btn"); btn.disabled=true;' +
+    'google.script.run.withSuccessHandler(function(){google.script.host.close()})' +
+    '.withFailureHandler(function(e){btn.disabled=false;alert(e);})' +
+    '.loadOrdersRangeManual(d1,d2);' +
     '}' +
     '</script></body></html>';
   
@@ -2780,17 +3094,21 @@ function showOrdersStatDialog() {
     'label{display:block;margin:8px 0 4px;font-weight:bold}' +
     'input{width:100%;padding:6px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px}' +
     'button{background:#4CAF50;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '</style></head><body>' +
     '<h3 style="margin-top:0">📦 Загрузка заказов за период</h3>' +
     '<label>Дата ОТ:</label><input type="date" id="dateFrom" value="2026-03-01">' +
     '<label>Дата ДО:</label><input type="date" id="dateTo" value="' + new Date().toISOString().slice(0,10) + '">' +
-    '<button onclick="load()">📥 Загрузить</button>' +
+    '<button id="btn" onclick="load()">📥 Загрузить</button>' +
     '<script>' +
     'function load(){' +
     'var d1=document.getElementById("dateFrom").value;' +
     'var d2=document.getElementById("dateTo").value;' +
     'if(!d1||!d2){alert("Выберите даты!");return;}' +
-    'google.script.run.withSuccessHandler(function(){google.script.host.close()}).loadOrdersRangeManual(d1,d2);' +
+    'var btn=document.getElementById("btn"); btn.disabled=true;' +
+    'google.script.run.withSuccessHandler(function(){google.script.host.close()})' +
+    '.withFailureHandler(function(e){btn.disabled=false;alert(e);})' +
+    '.loadOrdersRangeManual(d1,d2);' +
     '}' +
     '</script></body></html>';
   
@@ -2936,7 +3254,7 @@ function stocksRemoveDate_(sheet, headers, dateStr) {
   var mixed = false;
   var i;
   for (i = 0; i < oldDates.length; i++) {
-    var key = typeof adsDateKey_ === 'function' ? adsDateKey_(oldDates[i][0]) : String(oldDates[i][0] || '').substring(0, 10);
+    var key = sheetDayKey_(oldDates[i][0]);
     var same = key === dateStr;
     if (same && firstDrop < 0) firstDrop = i;
     if (!same && firstDrop >= 0) mixed = true;
@@ -2949,7 +3267,7 @@ function stocksRemoveDate_(sheet, headers, dateStr) {
   var all = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   var kept = [];
   for (i = 0; i < all.length; i++) {
-    var k = typeof adsDateKey_ === 'function' ? adsDateKey_(all[i][dateCol]) : String(all[i][dateCol] || '').substring(0, 10);
+    var k = sheetDayKey_(all[i][dateCol]);
     if (k !== dateStr) kept.push(all[i]);
   }
   sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
@@ -3378,6 +3696,7 @@ function showSuppliesDialog() {
     'input{width:100%;padding:8px;margin-bottom:12px;border:1px solid #ccc;border-radius:4px}' +
     'button{background:#4CAF50;color:white;padding:10px;border:none;border-radius:4px;cursor:pointer;width:100%;margin-top:5px}' +
     'button:hover{background:#45a049}' +
+    'button:disabled{background:#9e9e9e !important;cursor:default}' +
     '.info{background:#e3f2fd;padding:10px;margin:10px 0;border-radius:4px;font-size:12px}' +
     '</style></head><body>' +
     '<h3>📦 Поставки FBW</h3>' +
@@ -3393,11 +3712,12 @@ function showSuppliesDialog() {
     '<button onclick="loadDetailsById()">📋 Детали поставки</button>' +
     '<button onclick="loadGoodsById()">📦 Товары поставки</button>' +
     '<script>' +
-    'function loadList(){ var d1=document.getElementById("dateFrom").value; var d2=document.getElementById("dateTo").value; if(!d1||!d2){alert("Выберите даты!");return;} google.script.run.withSuccessHandler(function(){alert("Список поставок загружен! Теперь нажмите Шаг 2.");}).loadSuppliesListWithDates(d1,d2); }' +
-    'function loadAllDetailsAndGoods(){ google.script.run.withSuccessHandler(function(){alert("Детали и товары загружены! Теперь нажмите Шаг 3.");}).loadAllDetailsAndGoodsFromList(); }' +
-    'function createUnified(){ google.script.run.withSuccessHandler(function(){alert("Объединённый лист Поставки создан!");}).createUnifiedSuppliesSheet(); }' +
-    'function loadDetailsById(){ var id=document.getElementById("supplyId").value; if(!id){alert("Введите ID!");return;} google.script.run.withSuccessHandler(function(){alert("Детали загружены");}).loadSupplyDetailsById(id); }' +
-    'function loadGoodsById(){ var id=document.getElementById("supplyId").value; if(!id){alert("Введите ID!");return;} google.script.run.withSuccessHandler(function(){alert("Товары загружены");}).loadSupplyGoodsById(id); }' +
+    'function lockBtns(on){var all=document.querySelectorAll("button");for(var i=0;i<all.length;i++) all[i].disabled=!!on;}' +
+    'function loadList(){ var d1=document.getElementById("dateFrom").value; var d2=document.getElementById("dateTo").value; if(!d1||!d2){alert("Выберите даты!");return;} lockBtns(true); google.script.run.withSuccessHandler(function(){lockBtns(false);alert("Список поставок загружен! Теперь нажмите Шаг 2.");}).withFailureHandler(function(e){lockBtns(false);alert(e);}).loadSuppliesListWithDates(d1,d2); }' +
+    'function loadAllDetailsAndGoods(){ lockBtns(true); google.script.run.withSuccessHandler(function(){lockBtns(false);alert("Детали и товары загружены! Теперь нажмите Шаг 3.");}).withFailureHandler(function(e){lockBtns(false);alert(e);}).loadAllDetailsAndGoodsFromList(); }' +
+    'function createUnified(){ lockBtns(true); google.script.run.withSuccessHandler(function(){lockBtns(false);alert("Объединённый лист Поставки создан!");}).withFailureHandler(function(e){lockBtns(false);alert(e);}).createUnifiedSuppliesSheet(); }' +
+    'function loadDetailsById(){ var id=document.getElementById("supplyId").value; if(!id){alert("Введите ID!");return;} lockBtns(true); google.script.run.withSuccessHandler(function(){lockBtns(false);alert("Детали загружены");}).withFailureHandler(function(e){lockBtns(false);alert(e);}).loadSupplyDetailsById(id); }' +
+    'function loadGoodsById(){ var id=document.getElementById("supplyId").value; if(!id){alert("Введите ID!");return;} lockBtns(true); google.script.run.withSuccessHandler(function(){lockBtns(false);alert("Товары загружены");}).withFailureHandler(function(e){lockBtns(false);alert(e);}).loadSupplyGoodsById(id); }' +
     '</script></body></html>';
   
   var dialog = HtmlService.createHtmlOutput(html).setWidth(500).setHeight(550);
@@ -4133,8 +4453,12 @@ function updateSuppliesDaily() {
   appendSuppliesToListSheetNoDuplicates(newSupplies);
   appendDetailsToSheetNoDuplicates(allDetails, refreshedDetailIds);
   appendGoodsToSheetNoDuplicates(allGoods, refreshedGoodsIds);
-  rebuildUnifiedSheet();
-  sortAllSheetsBySupplyDate();
+  if (typeof morningChainOn_ === 'function' && morningChainOn_()) {
+    Logger.log('Утро: пересборка листа «Поставки» отложена до статусов FBW');
+  } else {
+    rebuildUnifiedSheet();
+    sortAllSheetsBySupplyDate();
+  }
   wbPutNamedFilters_(['Поставки_список', 'Детали_поставок', 'Товары_поставок', 'Поставки']);
 }
 
@@ -4421,28 +4745,42 @@ function rebuildUnifiedSheet() {
 function fetchSuppliesList(dateFrom, dateTo) {
   var token = getApiToken();
   if (!token) return [];
-  
-  var url = 'https://supplies-api.wildberries.ru/api/v1/supplies?limit=1000&offset=0';
-  var payload = { "Type": "FBW", "dateFrom": dateFrom, "dateTo": dateTo };
-  var options = {
-    method: 'POST',
-    headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-  
-  try {
-    var response = UrlFetchApp.fetch(url, options);
-    if (response.getResponseCode() !== 200) return [];
-    var data = JSON.parse(response.getContentText());
-    var supplies = Array.isArray(data) ? data : (data.data || data.supplies || []);
-    
-    // 🔥 ВОЗВРАЩАЕМ «СЫРЫЕ» ДАННЫЕ — форматирование сделают функции append
-    return supplies;
-  } catch(e) {
-    Logger.log('Ошибка fetchSuppliesList: ' + e);
-    return [];
+
+  var allSupplies = [];
+  var offset = 0;
+  var limit = 1000;
+  var hasMore = true;
+
+  while (hasMore) {
+    var url = 'https://supplies-api.wildberries.ru/api/v1/supplies?limit=' + limit + '&offset=' + offset;
+    var payload = { 'Type': 'FBW', 'dateFrom': dateFrom, 'dateTo': dateTo };
+    var options = {
+      method: 'POST',
+      headers: { 'Authorization': token, 'Content-Type': 'application/json' },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    try {
+      var response = UrlFetchApp.fetch(url, options);
+      if (response.getResponseCode() !== 200) break;
+      var data = JSON.parse(response.getContentText());
+      var supplies = Array.isArray(data) ? data : (data.data || data.supplies || []);
+      if (!supplies.length) {
+        hasMore = false;
+      } else {
+        allSupplies = allSupplies.concat(supplies);
+        hasMore = supplies.length === limit;
+        offset += limit;
+        if (hasMore) Utilities.sleep(200);
+      }
+    } catch (e) {
+      Logger.log('Ошибка fetchSuppliesList: ' + e);
+      break;
+    }
   }
+
+  return allSupplies;
 }
 
 function getDate30DaysAgo() {
@@ -4770,7 +5108,7 @@ function recordLkStocks() {
   if (!token) return;
 
   var host = 'https://seller-analytics-api.wildberries.ru';
-  var dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var dateStr = Utilities.formatDate(new Date(), sheetTimeZone_(), 'yyyy-MM-dd');
   Logger.log('Остатки ЛК, дата среза ' + dateStr);
 
   var createUrl = host + '/api/v1/warehouse_remains'
@@ -4881,17 +5219,33 @@ function lkWhKind_(name) {
   return '';
 }
 
-/** Полдень локального дня, чтобы дата на листе была как на «Остатки» и не съезжала на сутки. */
-function lkStocksDate_(val) {
+function sheetTimeZone_() {
+  try {
+    var tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    if (tz) return tz;
+  } catch (e) {}
+  return Session.getScriptTimeZone() || 'Europe/Samara';
+}
+
+/** Календарный день в часовом поясе таблицы: yyyy-MM-dd. */
+function sheetDayKey_(val) {
+  if (val === null || val === undefined || val === '') return '';
   if (Object.prototype.toString.call(val) === '[object Date]' && !isNaN(val.getTime())) {
-    return new Date(val.getFullYear(), val.getMonth(), val.getDate(), 12, 0, 0);
+    return Utilities.formatDate(val, sheetTimeZone_(), 'yyyy-MM-dd');
   }
-  var s = String(val || '').trim();
-  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12, 0, 0);
-  var dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-  if (dmy) return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 12, 0, 0);
-  return val;
+  var s = String(val).trim();
+  var iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+  var dmy = s.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (dmy) return dmy[3] + '-' + ('0' + dmy[2]).slice(-2) + '-' + ('0' + dmy[1]).slice(-2);
+  return s.substring(0, 10);
+}
+
+/** Полночь в часовом поясе таблицы. Без 12:00:00, чтобы дата совпадала с ДАТА() в формулах. */
+function lkStocksDate_(val) {
+  var ymd = sheetDayKey_(val);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return val;
+  return Utilities.parseDate(ymd + ' 00:00:00', sheetTimeZone_(), 'yyyy-MM-dd HH:mm:ss');
 }
 
 function lkVictimMap_() {
@@ -6214,12 +6568,12 @@ function updateAllReports2() {
   var token;
   try { token = getApiToken(); } catch (eTok) { token = ''; }
   if (typeof morningTgPendingList_ === 'function') {
-    morningTgPendingList_(['Товары', 'Остатки', 'В пути', 'Поставки']);
+    morningTgPendingList_(['Товары', 'История цен', 'Остатки', 'В пути', 'Поставки']);
   }
   if (!token) {
     lines.push('❌ Токен WB не найден');
     if (typeof morningTgFailList_ === 'function') {
-      morningTgFailList_(['Товары', 'Остатки', 'В пути', 'Поставки'], 'нет токена');
+      morningTgFailList_(['Товары', 'История цен', 'Остатки', 'В пути', 'Поставки'], 'нет токена');
     }
     tgSendJob_('updateAllReports2', false, lines, t0);
     return;
@@ -6236,6 +6590,13 @@ function updateAllReports2() {
     tgRunStep_(lines, 'Товары', function() {
       tgWatch_(lines, 'Товары', function() {
         loadAllProducts();
+      });
+    });
+    Utilities.sleep(2000);
+
+    tgRunStep_(lines, 'История цен', function() {
+      tgWatch_(lines, 'История цен', function() {
+        savePriceHistory();
       });
     });
     Utilities.sleep(2000);
@@ -6287,11 +6648,12 @@ function scheduleUpdateSuppliesStatuses_() {
 
 function runUpdateSuppliesStatusesJob_() {
   clearTriggersForHandler_('runUpdateSuppliesStatusesJob_');
-  // Свежий полный проход
-  var props = PropertiesService.getScriptProperties();
-  props.deleteProperty('SUPPLIES_STATUS_NEXT_SID');
-  props.deleteProperty('SUPPLIES_STATUS_IDX');
-  updateExistingSuppliesStatuses();
+  if (!morningChainSheetLockOrReschedule_('runUpdateSuppliesStatusesJob_', 45 * 1000, function() {
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('SUPPLIES_STATUS_NEXT_SID');
+    props.deleteProperty('SUPPLIES_STATUS_IDX');
+    updateExistingSuppliesStatuses();
+  })) return;
 }
 
 function clearTriggersForHandler_(handlerName) {
@@ -6345,6 +6707,11 @@ function updateExistingSuppliesStatuses() {
 
   if (toCheck.length === 0) {
     Logger.log('ℹ️ Нет поставок для проверки статусов (пропущено Принято: ' + skippedAccepted + ')');
+    if (typeof morningChainOn_ === 'function' && morningChainOn_()) {
+      rebuildUnifiedSheet();
+      sortAllSheetsBySupplyDate();
+      wbPutNamedFilters_(['Поставки_список', 'Детали_поставок', 'Товары_поставок', 'Поставки']);
+    }
     if (!isRunningFromTrigger()) showAlert('ℹ️ Нет поставок для проверки');
     return;
   }
@@ -6463,7 +6830,9 @@ function updateExistingSuppliesStatuses() {
 /** Продолжение проверки статусов без сброса индекса */
 function continueUpdateSuppliesStatusesJob_() {
   clearTriggersForHandler_('continueUpdateSuppliesStatusesJob_');
-  updateExistingSuppliesStatuses();
+  if (!morningChainSheetLockOrReschedule_('continueUpdateSuppliesStatusesJob_', 45 * 1000, function() {
+    updateExistingSuppliesStatuses();
+  })) return;
 }
 
 // ============================================
@@ -6653,12 +7022,97 @@ function morningTgFlush_() {
 
 var MORNING_CHAIN_HANDLERS_ = [
   'runMorningChainTick_',
+  'runMorningChainWatchdog_',
   'runMorningChain2_',
   'runMorningChainWaitStatuses_',
   'runMorningChainFbs_',
   'runMorningChainWaitCompose_',
   'runMorningChain3_'
 ];
+
+/** Свойство WB_MORNING_SKIP_STOCKS: 1=пропуск остатков FBW в утре, 0 или пусто=грузить. */
+var MORNING_SKIP_FBW_STOCKS_DEFAULT_ = false;
+
+function morningSkipFbwStocks_() {
+  var p = PropertiesService.getScriptProperties().getProperty('WB_MORNING_SKIP_STOCKS');
+  if (p === '0') return false;
+  if (p === '1') return true;
+  return MORNING_SKIP_FBW_STOCKS_DEFAULT_;
+}
+
+function morningChainJobTimeoutMs_(jobId) {
+  var m = {
+    finance: 8 * 60 * 1000,
+    ads: 8 * 60 * 1000,
+    funnel: 8 * 60 * 1000,
+    orders: 10 * 60 * 1000,
+    products: 12 * 60 * 1000,
+    fbwStocks: 22 * 60 * 1000,
+    transit: 10 * 60 * 1000,
+    supplies: 22 * 60 * 1000,
+    fbsOrders: 15 * 60 * 1000,
+    fbsSupplies: 15 * 60 * 1000
+  };
+  return m[jobId] || 8 * 60 * 1000;
+}
+
+function morningChainSheetLockHeld_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(50)) return true;
+  lock.releaseLock();
+  return false;
+}
+
+/** Замок на запись в книгу; при занятости — отложить handler через afterMs. */
+function morningChainSheetLockOrReschedule_(handlerName, afterMs, fn) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) {
+    Logger.log('Замок занят — ' + handlerName + ' через ' + afterMs + ' мс');
+    morningChainSchedule_(handlerName, afterMs || 45 * 1000);
+    return false;
+  }
+  try {
+    fn();
+    return true;
+  } finally {
+    try { lock.releaseLock(); } catch (eL) {}
+  }
+}
+
+function morningChainScheduleWatchdog_(jobId) {
+  if (typeof clearTriggersForHandler_ === 'function') clearTriggersForHandler_('runMorningChainWatchdog_');
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('WB_MORNING_WATCHDOG_JOB', jobId);
+  ScriptApp.newTrigger('runMorningChainWatchdog_')
+    .timeBased()
+    .after(morningChainJobTimeoutMs_(jobId))
+    .create();
+}
+
+function runMorningChainWatchdog_() {
+  if (typeof clearTriggersForHandler_ === 'function') clearTriggersForHandler_('runMorningChainWatchdog_');
+  if (!morningChainOn_()) return;
+  var props = PropertiesService.getScriptProperties();
+  var wdJob = props.getProperty('WB_MORNING_WATCHDOG_JOB');
+  var id = props.getProperty('WB_MORNING_JOB') || '';
+  if (!wdJob || wdJob !== id) return;
+  var job = morningChainJob_(id);
+  if (!job) return;
+
+  if (morningChainSheetLockHeld_() || props.getProperty('WB_MORNING_STEP_RUNNING') === id) {
+    Logger.log('Утренняя цепочка: сторож — шаг ' + id + ' ещё выполняется, продлеваем');
+    morningChainScheduleWatchdog_(id);
+    return;
+  }
+
+  Logger.log('Утренняя цепочка: сторож — таймаут шага ' + id);
+  if (typeof morningTgNote_ === 'function') {
+    morningTgNote_(false, job.tg, 'время ожидания истекло');
+  }
+  props.deleteProperty('WB_MORNING_STEP_RUNNING');
+  props.deleteProperty('WB_MORNING_WATCHDOG_JOB');
+  morningChainAdvance_(job);
+}
 
 var MORNING_CHAIN_JOBS_ = [
   { id: 'finance', tg: 'Финансы' },
@@ -6744,30 +7198,37 @@ function runMorningChainTick_() {
     return;
   }
 
-  if (props.getProperty('WB_MORNING_SAFETY') === job.id) {
-    Logger.log('Утренняя цепочка: таймаут шага ' + job.id);
-    if (typeof morningTgNote_ === 'function') {
-      morningTgNote_(false, job.tg, 'время ожидания истекло');
-    }
-    props.deleteProperty('WB_MORNING_SAFETY');
-    morningChainAdvance_(job);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(8000)) {
+    Logger.log('Утренняя цепочка: ждём замок, повтор шага ' + job.id);
+    morningChainSchedule_('runMorningChainTick_', 30 * 1000);
     return;
   }
 
-  props.setProperty('WB_MORNING_SAFETY', job.id);
-  morningChainSchedule_('runMorningChainTick_', 7 * 60 * 1000);
-  if (typeof morningTgPending_ === 'function') morningTgPending_(job.tg);
-  Logger.log('Утренняя цепочка: шаг ' + job.id);
-  morningChainRunStep_(job.id, function() { morningChainRunJob_(job.id); });
-  if (!morningChainOn_()) return;
-  props.deleteProperty('WB_MORNING_SAFETY');
-  morningChainAdvance_(job);
+  try {
+    if (typeof morningTgPending_ === 'function') morningTgPending_(job.tg);
+    props.setProperty('WB_MORNING_STEP_RUNNING', job.id);
+    morningChainScheduleWatchdog_(job.id);
+    Logger.log('Утренняя цепочка: шаг ' + job.id);
+    morningChainRunStep_(job.id, function() { morningChainRunJob_(job.id); });
+    if (!morningChainOn_()) return;
+    props.deleteProperty('WB_MORNING_STEP_RUNNING');
+    props.deleteProperty('WB_MORNING_WATCHDOG_JOB');
+    if (typeof clearTriggersForHandler_ === 'function') clearTriggersForHandler_('runMorningChainWatchdog_');
+    morningChainAdvance_(job);
+  } finally {
+    try { lock.releaseLock(); } catch (eR) {}
+  }
 }
 
 function morningChainStopTick_() {
-  PropertiesService.getScriptProperties().deleteProperty('WB_MORNING_SAFETY');
+  var props = PropertiesService.getScriptProperties();
+  props.deleteProperty('WB_MORNING_SAFETY');
+  props.deleteProperty('WB_MORNING_STEP_RUNNING');
+  props.deleteProperty('WB_MORNING_WATCHDOG_JOB');
   if (typeof clearTriggersForHandler_ === 'function') {
     clearTriggersForHandler_('runMorningChainTick_');
+    clearTriggersForHandler_('runMorningChainWatchdog_');
   }
 }
 
@@ -6889,9 +7350,20 @@ function morningJobProducts_() {
       loadAllProducts();
     });
   });
+  morningChainClearSheetFilter_('История цен');
+  tgRunStep_(lines, 'История цен', function() {
+    tgWatch_(lines, 'История цен', function() {
+      savePriceHistory();
+    });
+  });
 }
 
 function morningJobFbwStocks_() {
+  if (morningSkipFbwStocks_()) {
+    if (typeof morningTgNote_ === 'function') morningTgNote_(true, 'Остатки', 'пропуск (ручная загрузка)');
+    Logger.log('Утренняя цепочка: остатки FBW пропущены');
+    return;
+  }
   if (!morningJobToken_()) { morningTgNote_(false, 'Остатки', 'нет токена'); return; }
   morningChainClearSheetFilter_('Остатки');
   var lines = [];
@@ -6995,7 +7467,9 @@ function runMorningChain3_() {
   morningChainClearSelf_('runMorningChain3_');
   if (!morningChainOn_()) return;
   Logger.log('Утренняя цепочка: ч3');
-  morningChainRunStep_('ч3', function() { updateAllReports3(); });
+  if (!morningChainSheetLockOrReschedule_('runMorningChain3_', 60 * 1000, function() {
+    morningChainRunStep_('ч3', function() { updateAllReports3(); });
+  })) return;
   morningTgFlush_();
   try { поставитьФильтрыНаЛисты_([]); } catch (eF) {}
   PropertiesService.getScriptProperties().deleteProperty('WB_MORNING_CHAIN');
