@@ -48,25 +48,59 @@ function onOpen() {
 }
 
 // 2. РАБОТА С ТОКЕНОМ
+// Короткий ui.prompt оставляет только первую строку вставки и молча затирает рабочий токен.
 function setApiToken() {
-  var ui = SpreadsheetApp.getUi();
-  var response = ui.prompt('Введите API токен от Wildberries',
-    'Токен можно получить в личном кабинете WB\nНужны категории: "Статистика", "Продвижение", "Аналитика" (проба воронки)',
-    ui.ButtonSet.OK_CANCEL);
+  var html = HtmlService.createHtmlOutput(
+    '<!DOCTYPE html><html><head><style>' +
+    'body{font-family:Arial;padding:16px;margin:0}' +
+    'p{font-size:12px;line-height:1.45;color:#333;margin:0 0 10px}' +
+    'textarea{width:100%;height:150px;box-sizing:border-box;font-family:Consolas,monospace;font-size:12px}' +
+    'button{margin-top:10px;background:#4CAF50;color:#fff;padding:10px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px}' +
+    'button:disabled{background:#9e9e9e}' +
+    '#st{margin-top:8px;font-size:12px;color:#555}' +
+    '</style></head><body>' +
+    '<p>Вставьте токен WB целиком. Категории: Статистика, Продвижение, Контент, Маркетплейс, Аналитика. Сохранится только строка из трёх частей через точку. Обрезанный вариант старый токен не затирает.</p>' +
+    '<textarea id="t" placeholder="eyJ..."></textarea>' +
+    '<button id="btn" onclick="go()">Сохранить</button>' +
+    '<div id="st"></div>' +
+    '<script>' +
+    'function go(){' +
+    'var v=document.getElementById("t").value;' +
+    'document.getElementById("btn").disabled=true;' +
+    'document.getElementById("st").textContent="Проверяю…";' +
+    'google.script.run' +
+    '.withSuccessHandler(function(msg){document.getElementById("st").textContent=msg;alert(msg);google.script.host.close();})' +
+    '.withFailureHandler(function(e){document.getElementById("btn").disabled=false;document.getElementById("st").textContent=String(e.message||e);})' +
+    '.saveWbApiToken(v);' +
+    '}' +
+    '</script></body></html>'
+  ).setWidth(520).setHeight(380);
+  SpreadsheetApp.getUi().showModalDialog(html, 'API токен Wildberries');
+}
 
-  if (response.getSelectedButton() == ui.Button.OK) {
-    var token = response.getResponseText();
-    var props = PropertiesService.getUserProperties();
-    props.setProperty('WB_API_TOKEN', token);
-    ui.alert('✅ Токен сохранён!');
+function normalizeWbToken_(raw) {
+  var token = String(raw || '').replace(/\s+/g, '');
+  if (token.indexOf('Bearer') === 0) token = token.substring(6);
+  return token;
+}
+
+function saveWbApiToken(raw) {
+  var token = normalizeWbToken_(raw);
+  var parts = token ? token.split('.') : [];
+  if (token.indexOf('eyJ') !== 0 || parts.length !== 3 || parts[0].length < 10 || parts[1].length < 10 || parts[2].length < 10) {
+    throw new Error('Токен не сохранён: частей ' + parts.length + ' вместо 3, длина ' + token.length + '. Вставьте строку целиком, в ней две точки. Прежний токен не менял.');
   }
+  PropertiesService.getUserProperties().setProperty('WB_API_TOKEN', token);
+  return 'Токен сохранён. Длина ' + token.length + ', частей 3.';
 }
 
 function getApiToken() {
   var props = PropertiesService.getUserProperties();
-  var token = props.getProperty('WB_API_TOKEN');
+  var token = normalizeWbToken_(props.getProperty('WB_API_TOKEN'));
   if (!token) {
-    SpreadsheetApp.getUi().alert('⚠️ Токен не найден! Сначала введите его через меню.');
+    try {
+      SpreadsheetApp.getUi().alert('⚠️ Токен не найден! Сначала введите его через меню.');
+    } catch (e) {}
   }
   return token;
 }
