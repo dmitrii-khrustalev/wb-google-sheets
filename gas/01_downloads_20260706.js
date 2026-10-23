@@ -891,6 +891,7 @@ function addDataToSheetOptimized(data, sheetName, uniqueKeyField) {
     if (!isRunningFromTrigger()) {
       SpreadsheetApp.getUi().alert('⚠️ Новых записей не найдено');
     }
+    wbPutSheetFilter_(sheet);
     return;
   }
   
@@ -960,6 +961,7 @@ function addDataToSheetOptimized(data, sheetName, uniqueKeyField) {
     SpreadsheetApp.getUi().alert('✅ Добавлено ' + newData.length + ' новых записей');
   }
   Logger.log('Добавлено новых финансовых записей: ' + newData.length);
+  wbPutSheetFilter_(sheet);
 }
 
 function ensureFinanceKvvColumns_(sheet) {
@@ -1418,6 +1420,7 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
       SpreadsheetApp.getUi().alert('⚠️ Новых рекламных записей не найдено');
     }
     Logger.log('Новых рекламных записей нет');
+    wbPutSheetFilter_(sheet);
     return;
   }
   
@@ -1456,6 +1459,7 @@ function loadAdvExpenses(token, dateFrom, dateTo) {
     SpreadsheetApp.getUi().alert('✅ Добавлено ' + newStats.length + ' новых записей');
   }
   Logger.log('Добавлено новых рекламных записей: ' + newStats.length);
+  wbPutSheetFilter_(sheet);
 }
 
 
@@ -1719,6 +1723,7 @@ function saveProductsWithPricesToSheet(products, priceMap) {
       }
     }
   }
+  wbPutSheetFilter_(sheet);
 }
 
 // Функция для тестирования API цен (для отладки)
@@ -2018,6 +2023,7 @@ function addDataToSheet(newData, sheetName, uniqueField) {
   
   if (uniqueData.length === 0) {
     if (!isRunningFromTrigger()) SpreadsheetApp.getUi().alert('⚠️ Дубликаты не добавлены');
+    wbPutSheetFilter_(sheet);
     return;
   }
   
@@ -2055,6 +2061,7 @@ function addDataToSheet(newData, sheetName, uniqueField) {
   
   if (!isRunningFromTrigger()) SpreadsheetApp.getUi().alert('✅ Добавлено: ' + uniqueData.length + ' записей');
   Logger.log('Добавлено: ' + uniqueData.length + ' записей в лист ' + sheetName);
+  wbPutSheetFilter_(sheet);
 }
 
 function cleanEmptyRows() {
@@ -2145,6 +2152,7 @@ function протянутьФормулыЗаказыЛК() {
   }
   
   if (lastRow < 3) {
+    wbPutSheetFilter_(sheet, 2);
     SpreadsheetApp.getUi().alert('⚠️ Нет данных для протягивания формул');
     return;
   }
@@ -2163,9 +2171,9 @@ function протянутьФормулыЗаказыЛК() {
   const sourceRangeK = sheet.getRange("K1");
   const targetRangeK = sheet.getRange(3, 11, lastRow - 2, 1); // колонка K = 11
   sourceRangeK.copyTo(targetRangeK, SpreadsheetApp.CopyPasteType.PASTE_FORMULA, false);
-  
-  // Восстанавливаем фильтр
-  sheet.getRange(2, 1, lastRow, sheet.getLastColumn()).createFilter();
+
+  // Шапка на строке 2: в строке 1 лежат формулы-образцы.
+  wbPutSheetFilter_(sheet, 2);
   
   SpreadsheetApp.getUi().alert('✅ Формулы протянуты в листе "' + sheetName + '" до строки ' + lastRow);
 }
@@ -2400,6 +2408,7 @@ function saveOrdersToSheet(sheet, enhancedOrders) {
       sheet.getRange(2, colIndex, sheet.getLastRow() - 1, 1).setNumberFormat("#,##0.00");
     }
   }
+  wbPutSheetFilter_(sheet);
 }
 
 
@@ -2705,6 +2714,7 @@ function saveEnhancedOrdersToSheet(sheet, enhancedOrders) {
   
   sheet.autoResizeColumns(1, sheetHeaders.length);
   console.log('Сохранено заказов: ' + rows.length);
+  wbPutSheetFilter_(sheet);
 }
 
 // 🔥 Форматирует объект Date в строку "дд.мм.гггг"
@@ -2891,6 +2901,26 @@ function fetchStocksWithPagination(token) {
   });
 }
 
+/** Шапка закрепляется только если ниже есть хотя бы одна строка. Иначе Таблицы бросают ошибку. */
+function stocksSafeFreezeRows_(sheet, rows) {
+  if (!sheet) return;
+  var frozenCols = sheet.getFrozenColumns();
+  if (frozenCols > 0 && frozenCols >= sheet.getMaxColumns()) sheet.setFrozenColumns(0);
+  var want = rows > 0 ? rows : 0;
+  if (want > 0 && sheet.getMaxRows() > want) sheet.setFrozenRows(want);
+  else if (sheet.getFrozenRows() > 0) sheet.setFrozenRows(0);
+}
+
+/** Удаляет строки. Если это все незакреплённые строки листа, шапку на время открепляет. */
+function stocksDeleteRows_(sheet, start, count) {
+  if (!sheet || count < 1 || start < 1) return;
+  var frozen = sheet.getFrozenRows();
+  var deleteAllUnfrozen = frozen > 0 && start <= frozen + 1 && (start + count - 1) >= sheet.getMaxRows();
+  if (deleteAllUnfrozen) sheet.setFrozenRows(0);
+  sheet.deleteRows(start, count);
+  if (deleteAllUnfrozen) stocksSafeFreezeRows_(sheet, frozen);
+}
+
 /** Снимает с листа «Остатки» все строки выбранной даты (обычно сегодняшний снимок). */
 function stocksRemoveDate_(sheet, headers, dateStr) {
   if (!sheet || !dateStr || sheet.getLastRow() < 2) return 0;
@@ -2913,7 +2943,7 @@ function stocksRemoveDate_(sheet, headers, dateStr) {
   }
   if (firstDrop < 0) return 0;
   if (!mixed) {
-    sheet.deleteRows(2 + firstDrop, oldDates.length - firstDrop);
+    stocksDeleteRows_(sheet, 2 + firstDrop, oldDates.length - firstDrop);
     return oldDates.length - firstDrop;
   }
   var all = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
@@ -2981,7 +3011,10 @@ function appendToStockSheetFull(rows) {
     newRows.push(r);
   }
 
-  if (newRows.length === 0) return 0;
+  if (newRows.length === 0) {
+    wbPutSheetFilter_(sheet);
+    return 0;
+  }
   
   // Записываем
   var startRow = sheet.getLastRow() + 1;
@@ -3000,7 +3033,8 @@ function appendToStockSheetFull(rows) {
       sheet.getRange(2, totalWeightColumnIndex, lastRowAfterAdd - 1, 1).setNumberFormat('0.00');
     }
   }
-  
+
+  wbPutSheetFilter_(sheet);
   return newRows.length;
 }
 
@@ -3170,7 +3204,8 @@ function saveWarehousesToSheet(warehouses) {
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
     sheet.autoResizeColumns(1, headers.length);
   }
-  
+
+  wbPutSheetFilter_(sheet);
   showAlert('✅ Загружено складов: ' + rows.length);
 }
 
@@ -3442,6 +3477,7 @@ function saveSuppliesListToSheet(supplies) {
   
   if (supplies.length === 0) {
     sheet.getRange(1, 1).setValue('Нет данных');
+    wbPutSheetFilter_(sheet);
     return;
   }
   
@@ -3507,6 +3543,7 @@ function saveSuppliesListToSheet(supplies) {
   }
   
   sheet.autoResizeColumns(1, headers.length);
+  wbPutSheetFilter_(sheet);
 }
 
 // 3. ЗАГРУЗКА ДЕТАЛЕЙ И ТОВАРОВ ДЛЯ ВСЕХ ПОСТАВОК
@@ -3616,7 +3653,7 @@ function saveDetailsToSheet(details) {
   var sheet = ss.getSheetByName('Детали_поставок');
   if (sheet) sheet.clear(); else sheet = ss.insertSheet('Детали_поставок');
   
-  if (details.length === 0) { sheet.getRange(1,1).setValue('Нет данных'); return; }
+  if (details.length === 0) { sheet.getRange(1,1).setValue('Нет данных'); wbPutSheetFilter_(sheet); return; }
   
   if (typeof wbRowToRu_ === 'function') {
     details = details.map(function(d) { return wbRowToRu_(d, typeof wbMapForSheet_ === 'function' ? wbMapForSheet_('Детали_поставок') : null); });
@@ -3672,6 +3709,7 @@ function saveDetailsToSheet(details) {
   }
   
   sheet.autoResizeColumns(1, headers.length);
+  wbPutSheetFilter_(sheet);
 }
 
 // Сохранение товаров
@@ -3680,7 +3718,7 @@ function saveGoodsToSheet(goods) {
   var sheet = ss.getSheetByName('Товары_поставок');
   if (sheet) sheet.clear(); else sheet = ss.insertSheet('Товары_поставок');
   
-  if (goods.length === 0) { sheet.getRange(1,1).setValue('Нет данных'); return; }
+  if (goods.length === 0) { sheet.getRange(1,1).setValue('Нет данных'); wbPutSheetFilter_(sheet); return; }
   
   if (typeof wbRowToRu_ === 'function') {
     goods = goods.map(function(g) { return wbRowToRu_(g, typeof wbMapForSheet_ === 'function' ? wbMapForSheet_('Товары_поставок') : null); });
@@ -3701,6 +3739,7 @@ function saveGoodsToSheet(goods) {
   }
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sheet.autoResizeColumns(1, headers.length);
+  wbPutSheetFilter_(sheet);
 }
 
 // 4. ЗАГРУЗКА ДЕТАЛЕЙ ПО ID
@@ -3974,6 +4013,7 @@ function createUnifiedSuppliesSheet() {
     }
   }
   
+  wbPutSheetFilter_(unifiedSheet);
   showAlert('✅ Объединённый лист "Поставки" создан!\nСтрок: ' + allRows.length);
 }
 
@@ -4011,6 +4051,7 @@ function updateSuppliesDaily() {
   var freshSupplies = fetchSuppliesList(dateFrom, dateTo);
   if (!freshSupplies || freshSupplies.length === 0) {
     Logger.log('✅ Поставки: список пуст (' + dateFrom + ' — ' + dateTo + ')');
+    wbPutNamedFilters_(['Поставки_список', 'Детали_поставок', 'Товары_поставок', 'Поставки']);
     return;
   }
   
@@ -4094,6 +4135,7 @@ function updateSuppliesDaily() {
   appendGoodsToSheetNoDuplicates(allGoods, refreshedGoodsIds);
   rebuildUnifiedSheet();
   sortAllSheetsBySupplyDate();
+  wbPutNamedFilters_(['Поставки_список', 'Детали_поставок', 'Товары_поставок', 'Поставки']);
 }
 
 function appendSuppliesToListSheetNoDuplicates(newSupplies) {
@@ -4700,6 +4742,7 @@ function saveStocksHistory() {
   sheet.getRange(1, 1, newData.length, headers.length).setValues(newData);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f1f1f1');
   sheet.autoResizeColumns(1, headers.length);
+  wbPutSheetFilter_(sheet);
   
   Logger.log('✅ В пути: ' + (newData.length - 1) + ' строк');
 }
@@ -4799,7 +4842,6 @@ function recordLkStocks() {
     'Дата: ' + dateStr + '\n' +
     'Строк: ' + written.rows + '\n' +
     'Складов: ' + written.warehouses + '\n' +
-    'Строк «в пути»: ' + written.transitRows + '\n' +
     'Лист: Остатки ЛК\n\n' +
     'Повтор за сегодня перезаписывает только эту дату.' +
     (written.oldLeft ? '\n\nСтарый лист «Остатки_ЛК_проба» не трогал.' : '')
@@ -4809,6 +4851,21 @@ function recordLkStocks() {
 var LK_STOCKS_SHEET_ = 'Остатки ЛК';
 var LK_STOCKS_SHEET_OLD_ = 'Остатки_ЛК_проба';
 var LK_STOCKS_HEADERS_ = [
+  'Дата', 'Артикул продавца', 'Название', 'Артикул WB', 'Предмет', 'Бренд', 'Размер',
+  'Склад', 'Остаток', 'Регион поставки', 'Вес, кг за 1 шт', 'Общий вес, кг',
+  'Объём', 'Пострадавший'
+];
+var LK_STOCKS_HEADERS_VICTIM_AFTER_REGION_ = [
+  'Дата', 'Артикул продавца', 'Название', 'Артикул WB', 'Предмет', 'Бренд', 'Размер',
+  'Склад', 'Остаток', 'Регион поставки', 'Пострадавший', 'Вес, кг за 1 шт', 'Общий вес, кг',
+  'Объём'
+];
+var LK_STOCKS_HEADERS_MID_ = [
+  'Дата', 'Артикул продавца', 'Название', 'Артикул WB', 'Предмет', 'Бренд', 'Размер',
+  'Склад', 'Остаток', 'Регион поставки', 'Вес, кг за 1 шт', 'Общий вес, кг',
+  'Объём'
+];
+var LK_STOCKS_HEADERS_OLD_ = [
   'Дата', 'Артикул продавца', 'Название', 'Артикул WB', 'Предмет', 'Бренд', 'Размер',
   'Склад', 'Остаток', 'Регион поставки', 'Вес, кг за 1 шт', 'Общий вес, кг',
   'Штрихкод', 'Объём', 'В пути к покупателю', 'В пути возврат'
@@ -4821,6 +4878,61 @@ function lkWhKind_(name) {
   if (n.indexOf('в пути до получател') === 0) return 'toClient';
   if (n.indexOf('в пути возврат') === 0) return 'fromClient';
   if (n.indexOf('всего находится на складах') === 0) return 'total';
+  return '';
+}
+
+/** Полдень локального дня, чтобы дата на листе была как на «Остатки» и не съезжала на сутки. */
+function lkStocksDate_(val) {
+  if (Object.prototype.toString.call(val) === '[object Date]' && !isNaN(val.getTime())) {
+    return new Date(val.getFullYear(), val.getMonth(), val.getDate(), 12, 0, 0);
+  }
+  var s = String(val || '').trim();
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12, 0, 0);
+  var dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (dmy) return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), 12, 0, 0);
+  return val;
+}
+
+function lkVictimMap_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Регион поставки');
+  var map = {};
+  if (!sheet || sheet.getLastRow() < 2) return map;
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var whIdx = -1;
+  var vIdx = -1;
+  var i, h;
+  for (i = 0; i < headers.length; i++) {
+    h = String(headers[i] || '').trim().toLowerCase();
+    if (h === 'склад' && whIdx < 0) whIdx = i;
+    if (h === 'пострадавший') vIdx = i;
+  }
+  if (whIdx < 0) whIdx = 0;
+  if (vIdx < 0) {
+    Logger.log('Остатки ЛК: на листе «Регион поставки» нет столбца Пострадавший');
+    return map;
+  }
+  var name, raw, flag;
+  for (i = 1; i < data.length; i++) {
+    name = String(data[i][whIdx] || '').trim().toLowerCase();
+    if (!name) continue;
+    raw = data[i][vIdx];
+    flag = String(raw || '').trim().toLowerCase();
+    map[name] = (flag === 'да' || raw === true) ? 'да' : '';
+  }
+  return map;
+}
+
+function lkVictim_(warehouse, map) {
+  if (!warehouse || !map) return '';
+  var name = String(warehouse).trim().toLowerCase();
+  if (!name) return '';
+  if (Object.prototype.hasOwnProperty.call(map, name)) return map[name];
+  var key;
+  for (key in map) {
+    if (name.indexOf(key) !== -1) return map[key];
+  }
   return '';
 }
 
@@ -4845,26 +4957,123 @@ function lkStocksEnsureSheet_(ss) {
   return ss.insertSheet(LK_STOCKS_SHEET_);
 }
 
-function lkStocksHeadersOk_(sheet) {
-  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < LK_STOCKS_HEADERS_.length) return false;
-  var h = sheet.getRange(1, 1, 1, LK_STOCKS_HEADERS_.length).getValues()[0];
+function lkStocksHeadersMatch_(sheet, expected) {
+  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < expected.length) return false;
+  var h = sheet.getRange(1, 1, 1, expected.length).getValues()[0];
   var i;
-  for (i = 0; i < LK_STOCKS_HEADERS_.length; i++) {
-    if (String(h[i] || '').trim() !== LK_STOCKS_HEADERS_[i]) return false;
+  for (i = 0; i < expected.length; i++) {
+    if (String(h[i] || '').trim() !== expected[i]) return false;
   }
   return true;
+}
+
+function lkStocksHeadersOk_(sheet) {
+  return lkStocksHeadersMatch_(sheet, LK_STOCKS_HEADERS_);
+}
+
+function lkStocksRewrite_(sheet, out) {
+  sheet.clear();
+  sheet.getRange(1, 1, out.length, LK_STOCKS_HEADERS_.length).setValues(out);
+  stocksSafeFreezeRows_(sheet, 1);
+}
+
+/** Снимает штрихкод, столбцы «в пути» и строки с пустым складом, дни сохраняет. */
+function lkStocksMigrateOld_(sheet, victimMap) {
+  var lastRow = sheet.getLastRow();
+  var width = Math.max(sheet.getLastColumn(), LK_STOCKS_HEADERS_OLD_.length);
+  var data = sheet.getRange(1, 1, lastRow, width).getValues();
+  var out = [LK_STOCKS_HEADERS_];
+  var i, row, wh;
+  for (i = 1; i < data.length; i++) {
+    row = data[i];
+    wh = String(row[7] || '').trim();
+    if (!wh) continue;
+    out.push([
+      lkStocksDate_(row[0]), row[1], row[2], row[3], row[4], row[5], row[6],
+      wh, row[8], row[9], row[10], row[11],
+      row[13], lkVictim_(wh, victimMap)
+    ]);
+  }
+  lkStocksRewrite_(sheet, out);
+  Logger.log('Остатки ЛК: старая шапка переписана, строк без пустого склада ' + (out.length - 1));
+}
+
+/** Добавляет «Пострадавший» в уже длинный лист без этого столбца. */
+function lkStocksMigrateMid_(sheet, victimMap) {
+  var lastRow = sheet.getLastRow();
+  var width = Math.max(sheet.getLastColumn(), LK_STOCKS_HEADERS_MID_.length);
+  var data = sheet.getRange(1, 1, lastRow, width).getValues();
+  var out = [LK_STOCKS_HEADERS_];
+  var i, row, wh;
+  for (i = 1; i < data.length; i++) {
+    row = data[i];
+    wh = String(row[7] || '').trim();
+    if (!wh) continue;
+    out.push([
+      lkStocksDate_(row[0]), row[1], row[2], row[3], row[4], row[5], row[6],
+      wh, row[8], row[9], row[10], row[11], row[12],
+      lkVictim_(wh, victimMap)
+    ]);
+  }
+  lkStocksRewrite_(sheet, out);
+  Logger.log('Остатки ЛК: добавлен столбец Пострадавший, строк ' + (out.length - 1));
+}
+
+/** Переносит «Пострадавший» из середины в последний столбец. */
+function lkStocksMigrateVictimPos_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var width = Math.max(sheet.getLastColumn(), LK_STOCKS_HEADERS_VICTIM_AFTER_REGION_.length);
+  var data = sheet.getRange(1, 1, lastRow, width).getValues();
+  var out = [LK_STOCKS_HEADERS_];
+  var i, row, wh;
+  for (i = 1; i < data.length; i++) {
+    row = data[i];
+    wh = String(row[7] || '').trim();
+    if (!wh) continue;
+    out.push([
+      lkStocksDate_(row[0]), row[1], row[2], row[3], row[4], row[5], row[6],
+      wh, row[8], row[9], row[11], row[12], row[13], row[10]
+    ]);
+  }
+  lkStocksRewrite_(sheet, out);
+  Logger.log('Остатки ЛК: столбец Пострадавший перенесён в конец, строк ' + (out.length - 1));
+}
+
+function lkStocksFormat_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1) return;
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(sheet.getLastColumn(), LK_STOCKS_HEADERS_.length);
+  var header = sheet.getRange(1, 1, 1, lastCol);
+  header.setFontFamily('Arial').setFontSize(10).setFontWeight('bold').setBackground('#ffffff');
+  stocksSafeFreezeRows_(sheet, 1);
+  sheet.setColumnWidth(1, 90);
+  if (lastRow < 2) return;
+  var body = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  body.setFontFamily('Arial').setFontSize(10);
+  var dates = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var i;
+  for (i = 0; i < dates.length; i++) dates[i][0] = lkStocksDate_(dates[i][0]);
+  var dateRange = sheet.getRange(2, 1, lastRow - 1, 1);
+  dateRange.setValues(dates);
+  dateRange.setNumberFormat('dd.mm.yyyy');
+  var wUnit = LK_STOCKS_HEADERS_.indexOf('Вес, кг за 1 шт') + 1;
+  var wSum = LK_STOCKS_HEADERS_.indexOf('Общий вес, кг') + 1;
+  var qty = LK_STOCKS_HEADERS_.indexOf('Остаток') + 1;
+  if (qty > 0) sheet.getRange(2, qty, lastRow - 1, 1).setNumberFormat('0');
+  if (wUnit > 0) sheet.getRange(2, wUnit, lastRow - 1, 1).setNumberFormat('0.000');
+  if (wSum > 0) sheet.getRange(2, wSum, lastRow - 1, 1).setNumberFormat('0.00');
 }
 
 function lkStocksWrite_(dateStr, items) {
   var productsDict = getProductsDictionary();
   var regionMap = getRegionMap();
   var weightsMap = loadWeightsMapForStocks();
+  var victimMap = lkVictimMap_();
   var rows = [];
   var seenWh = {};
-  var transitRows = 0;
   var i, w, it, whs, name, kind, q, product, vendorCode, weightPerUnit;
-  var nmId, title, subject, brand, size, barcode, volume;
-  var toClient, fromClient, whQty, whOrder, amount, region, totalWeight;
+  var nmId, title, subject, brand, size, volume;
+  var whQty, whOrder, amount, region, totalWeight;
 
   for (i = 0; i < items.length; i++) {
     it = items[i] || {};
@@ -4877,11 +5086,8 @@ function lkStocksWrite_(dateStr, items) {
     subject = it.subjectName || product.subject || '';
     brand = it.brand || product.brand || '';
     size = it.techSize != null && it.techSize !== '' ? String(it.techSize) : '';
-    barcode = it.barcode != null && it.barcode !== '' ? String(it.barcode) : '';
     volume = it.volume != null && it.volume !== '' ? it.volume : '';
 
-    toClient = 0;
-    fromClient = 0;
     whQty = {};
     whOrder = [];
     whs = it.warehouses || [];
@@ -4891,9 +5097,7 @@ function lkStocksWrite_(dateStr, items) {
       kind = lkWhKind_(name);
       q = Number(whs[w].quantity);
       if (isNaN(q)) q = 0;
-      if (kind === 'toClient') { toClient += q; continue; }
-      if (kind === 'fromClient') { fromClient += q; continue; }
-      if (kind === 'total') continue;
+      if (kind) continue;
       if (whQty[name] == null) whOrder.push(name);
       whQty[name] = (whQty[name] || 0) + q;
     }
@@ -4906,20 +5110,9 @@ function lkStocksWrite_(dateStr, items) {
       region = getRegionFromMap(name, regionMap);
       totalWeight = weightPerUnit * amount;
       rows.push([
-        dateStr, vendorCode, title, nmId, subject, brand, size,
+        lkStocksDate_(dateStr), vendorCode, title, nmId, subject, brand, size,
         name, amount, region, weightPerUnit, totalWeight,
-        barcode, volume, '', ''
-      ]);
-    }
-
-    if (toClient > 0 || fromClient > 0) {
-      transitRows++;
-      rows.push([
-        dateStr, vendorCode, title, nmId, subject, brand, size,
-        '', '', '', weightPerUnit, '',
-        barcode, volume,
-        toClient > 0 ? toClient : '',
-        fromClient > 0 ? fromClient : ''
+        volume, lkVictim_(name, victimMap)
       ]);
     }
   }
@@ -4928,11 +5121,13 @@ function lkStocksWrite_(dateStr, items) {
   var sheet = lkStocksEnsureSheet_(ss);
   var oldLeft = !!ss.getSheetByName(LK_STOCKS_SHEET_OLD_);
   if (typeof wbClearFilter_ === 'function') wbClearFilter_(sheet);
+  if (lkStocksHeadersMatch_(sheet, LK_STOCKS_HEADERS_OLD_)) lkStocksMigrateOld_(sheet, victimMap);
+  else if (lkStocksHeadersMatch_(sheet, LK_STOCKS_HEADERS_MID_)) lkStocksMigrateMid_(sheet, victimMap);
+  else if (lkStocksHeadersMatch_(sheet, LK_STOCKS_HEADERS_VICTIM_AFTER_REGION_)) lkStocksMigrateVictimPos_(sheet);
   if (!lkStocksHeadersOk_(sheet)) {
     sheet.clear();
     sheet.getRange(1, 1, 1, LK_STOCKS_HEADERS_.length).setValues([LK_STOCKS_HEADERS_]);
-    sheet.getRange(1, 1, 1, LK_STOCKS_HEADERS_.length).setFontWeight('bold');
-    sheet.setFrozenRows(1);
+    stocksSafeFreezeRows_(sheet, 1);
     sheet.setTabColor(null);
   }
 
@@ -4944,12 +5139,9 @@ function lkStocksWrite_(dateStr, items) {
       batch = rows.slice(b, b + 1000);
       sheet.getRange(startRow + b, 1, batch.length, LK_STOCKS_HEADERS_.length).setValues(batch);
     }
-    var lastRow = sheet.getLastRow();
-    if (lastRow >= 2) {
-      sheet.getRange(2, 11, lastRow - 1, 1).setNumberFormat('0.000');
-      sheet.getRange(2, 12, lastRow - 1, 1).setNumberFormat('0.00');
-    }
   }
+  lkStocksFormat_(sheet);
+  wbPutSheetFilter_(sheet);
 
   var whNames = Object.keys(seenWh);
   whNames.sort(function(a, c) { return a.localeCompare(c, 'ru'); });
@@ -4957,7 +5149,6 @@ function lkStocksWrite_(dateStr, items) {
   return {
     rows: rows.length,
     warehouses: whNames.length,
-    transitRows: transitRows,
     removed: removed,
     oldLeft: oldLeft
   };
@@ -5343,6 +5534,7 @@ function shCsvWriteSheets_(ss, dateFrom, dateTo, parsed) {
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e8f5e9');
   sheet.setFrozenRows(1);
   sheet.setTabColor('#d9ead3');
+  wbPutSheetFilter_(sheet);
   return { rows: n, truncated: parsed.rows.length > maxRows };
 }
 
@@ -5704,6 +5896,7 @@ function sfAppendDailyRows_(ss, products, selStart, selEnd, currency) {
   if (wsIdx >= 0) {
     try { sheet.getRange(2, wsIdx + 1, sheet.getLastRow() - 1, 1).setNumberFormat('0.000'); } catch (e4) {}
   }
+  wbPutSheetFilter_(sheet);
   return rows.length;
 }
 
@@ -6260,6 +6453,7 @@ function updateExistingSuppliesStatuses() {
   props.deleteProperty('SUPPLIES_STATUS_NEXT_SID');
   props.deleteProperty('SUPPLIES_STATUS_IDX');
   rebuildUnifiedSheet();
+  wbPutNamedFilters_(['Поставки_список', 'Детали_поставок', 'Товары_поставок', 'Поставки']);
 
   var msg = '✅ Обновление статусов завершено! Изменено: ' + updatedCount + ', удалено: ' + deletedCount;
   Logger.log(msg);
@@ -6609,16 +6803,20 @@ function morningChainAdvance_(job) {
 }
 
 function morningChainRunJob_(id) {
-  if (id === 'finance') morningJobFinance_();
-  else if (id === 'ads') morningJobAds_();
-  else if (id === 'funnel') morningJobFunnel_();
-  else if (id === 'orders') morningJobOrders_();
-  else if (id === 'products') morningJobProducts_();
-  else if (id === 'fbwStocks') morningJobFbwStocks_();
-  else if (id === 'transit') morningJobTransit_();
-  else if (id === 'supplies') morningJobSupplies_();
-  else if (id === 'fbsOrders') morningJobFbsOrders_();
-  else if (id === 'fbsSupplies') morningJobFbsSupplies_();
+  try {
+    if (id === 'finance') morningJobFinance_();
+    else if (id === 'ads') morningJobAds_();
+    else if (id === 'funnel') morningJobFunnel_();
+    else if (id === 'orders') morningJobOrders_();
+    else if (id === 'products') morningJobProducts_();
+    else if (id === 'fbwStocks') morningJobFbwStocks_();
+    else if (id === 'transit') morningJobTransit_();
+    else if (id === 'supplies') morningJobSupplies_();
+    else if (id === 'fbsOrders') morningJobFbsOrders_();
+    else if (id === 'fbsSupplies') morningJobFbsSupplies_();
+  } finally {
+    try { wbPutAlwaysFilters_(); } catch (eF) {}
+  }
 }
 
 function morningYesterday_() {
@@ -6902,28 +7100,82 @@ function сброситьФильтрыНаВсехЛистах() {
 }
 
 /**
- * Ставит фильтры обратно. Не снимает уже висящие.
- * Снимок с начала прогона + рабочие листы загрузок (даже если утром
- * фильтров уже не было — иначе они больше никогда не вернутся).
+ * Ставит фильтры обратно.
+ * Рабочие листы загрузок всегда получают фильтр с строки заголовка,
+ * даже если снимок утром запомнил другую строку или фильтр уже висел ниже.
+ * Отчёты (шапка не в строке 1) не двигаем, если фильтр уже стоит.
  */
 var WB_FILTER_ALWAYS_ = [
-  'Финансовые_ежедневные', 'Рекламные_расходы', 'Воронка продаж', 'Заказы', 'Товары',
-  'Остатки', 'Остатки ЛК', 'В пути', 'Поставки_список', 'Детали_поставок', 'Товары_поставок',
+  'Финансовые_ежедневные', 'Финансовые_недельные', 'Рекламные_расходы', 'Воронка продаж', 'Заказы', 'Товары',
+  'Остатки', 'Остатки ЛК', 'В пути', 'Остатки_CSV_проба', 'Склады_WB',
+  'Поставки_список', 'Детали_поставок', 'Товары_поставок',
   'Поставки', 'ЗаказыЛК',
   'FBS Остатки', 'FBS Заказы', 'FBS Поставки', 'FBS Поставка_состав',
   'FBS Офисы', 'FBS Склады'
 ];
 
-function wbPutFilter_(sheet, startRow, startCol) {
+/** Шапка не в первой строке. */
+function wbFilterHeaderRow_(name) {
+  if (name === 'ЗаказыЛК') return 2;
+  return 1;
+}
+
+function wbPutFilter_(sheet, startRow, startCol, force) {
   if (!sheet) return false;
-  if (sheet.getFilter()) return true;
-  var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
   startRow = startRow || 1;
   startCol = startCol || 1;
-  if (lastRow < startRow || lastCol < startCol) return false;
-  sheet.getRange(startRow, startCol, lastRow - startRow + 1, lastCol - startCol + 1).createFilter();
+  var lastRow = Math.max(sheet.getLastRow(), startRow);
+  var lastCol = Math.max(sheet.getLastColumn(), startCol);
+  var numRows = lastRow - startRow + 1;
+  var numCols = lastCol - startCol + 1;
+  if (numRows < 1 || numCols < 1) return false;
+  var filter = null;
+  try { filter = sheet.getFilter(); } catch (e0) { filter = null; }
+  if (filter) {
+    var range = null;
+    try { range = filter.getRange(); } catch (e1) { range = null; }
+    if (range && range.getRow() === startRow && range.getColumn() === startCol &&
+        range.getLastRow() >= lastRow && range.getLastColumn() >= lastCol) {
+      return true;
+    }
+    if (!force) return true;
+    try { filter.remove(); } catch (eR) {}
+  }
+  sheet.getRange(startRow, startCol, numRows, numCols).createFilter();
   return true;
+}
+
+function wbPutSheetFilter_(sheet, startRow) {
+  if (!sheet) return;
+  try {
+    wbPutFilter_(sheet, startRow || 1, 1, true);
+  } catch (e) {
+    Logger.log('Фильтр «' + sheet.getName() + '»: ' + e);
+  }
+}
+
+function wbPutNamedFilters_(names) {
+  var ss;
+  try { ss = SpreadsheetApp.getActiveSpreadsheet(); } catch (e0) { return; }
+  if (!ss || !names) return;
+  var i, sh;
+  for (i = 0; i < names.length; i++) {
+    sh = ss.getSheetByName(names[i]);
+    if (sh) wbPutSheetFilter_(sh, wbFilterHeaderRow_(names[i]));
+  }
+}
+
+function wbPutAlwaysFilters_() {
+  wbPutNamedFilters_(WB_FILTER_ALWAYS_);
+  try {
+    if (typeof fbsSidecar_ !== 'function') return;
+    var sc = fbsSidecar_();
+    var i, sh2;
+    for (i = 0; i < WB_FILTER_ALWAYS_.length; i++) {
+      sh2 = sc.getSheetByName(WB_FILTER_ALWAYS_[i]);
+      if (sh2) wbPutSheetFilter_(sh2, wbFilterHeaderRow_(WB_FILTER_ALWAYS_[i]));
+    }
+  } catch (e) {}
 }
 
 function поставитьФильтрыНаЛисты_(lines) {
@@ -6951,7 +7203,15 @@ function поставитьФильтрыНаЛисты_(lines) {
     try {
       var sheet = ss.getSheetByName(names[i]);
       if (!sheet) continue;
-      if (wbPutFilter_(sheet, plan[names[i]].startRow, plan[names[i]].startCol)) ok++;
+      var startRow = plan[names[i]].startRow;
+      var startCol = plan[names[i]].startCol;
+      var force = false;
+      if (WB_FILTER_ALWAYS_.indexOf(names[i]) !== -1) {
+        startRow = wbFilterHeaderRow_(names[i]);
+        startCol = 1;
+        force = true;
+      }
+      if (wbPutFilter_(sheet, startRow, startCol, force)) ok++;
     } catch (e) {
       fail++;
       Logger.log('⚠️ Фильтр обратно «' + names[i] + '»: ' + e);
@@ -6964,7 +7224,7 @@ function поставитьФильтрыНаЛисты_(lines) {
         var sh2 = sc.getSheetByName(WB_FILTER_ALWAYS_[i]);
         if (!sh2) continue;
         try {
-          if (wbPutFilter_(sh2, 1, 1)) ok++;
+          if (wbPutFilter_(sh2, wbFilterHeaderRow_(WB_FILTER_ALWAYS_[i]), 1, true)) ok++;
         } catch (e3) {
           fail++;
           Logger.log('⚠️ Фильтр sidecar «' + WB_FILTER_ALWAYS_[i] + '»: ' + e3);

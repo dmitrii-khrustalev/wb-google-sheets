@@ -544,6 +544,99 @@ function ordersKgWeightMap_(ss) {
   return map;
 }
 
+function lkReportDateKey_(val) {
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.getFullYear() + '-' + ('0' + (val.getMonth() + 1)).slice(-2) + '-' + ('0' + val.getDate()).slice(-2);
+  }
+  var s = String(val == null ? '' : val).trim();
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+  var dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (dmy) return dmy[3] + '-' + ('0' + dmy[2]).slice(-2) + '-' + ('0' + dmy[1]).slice(-2);
+  return '';
+}
+
+function lkReportDateLabel_(key) {
+  var m = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] : String(key || '');
+}
+
+/** Последняя дата «Остатки ЛК», сумма «Остаток» по артикулу. Склады с заполненным «Пострадавший» не входят. */
+function lkReportStocksByArt_(ss) {
+  var sheet = ss.getSheetByName('Остатки ЛК');
+  if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() < 1) {
+    SpreadsheetApp.getUi().alert('Лист «Остатки ЛК» пуст или не найден.');
+    return null;
+  }
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var dIdx = -1, aIdx = -1, qIdx = -1, vIdx = -1, i, h;
+  for (i = 0; i < headers.length; i++) {
+    h = String(headers[i] || '').trim();
+    if (h === 'Дата') dIdx = i;
+    else if (h === 'Артикул продавца') aIdx = i;
+    else if (h === 'Остаток') qIdx = i;
+    else if (h === 'Пострадавший') vIdx = i;
+  }
+  if (dIdx < 0 || aIdx < 0 || qIdx < 0) {
+    SpreadsheetApp.getUi().alert('На «Остатки ЛК» нет столбцов Дата / Артикул продавца / Остаток.');
+    return null;
+  }
+  if (vIdx < 0) {
+    SpreadsheetApp.getUi().alert('На «Остатки ЛК» нет столбца «Пострадавший».');
+    return null;
+  }
+  var latest = '';
+  var key;
+  for (i = 1; i < data.length; i++) {
+    key = lkReportDateKey_(data[i][dIdx]);
+    if (key > latest) latest = key;
+  }
+  var byArt = {};
+  var rows = 0;
+  var skipped = 0;
+  if (!latest) return { byArt: byArt, date: '', rows: 0, skipped: 0 };
+  for (i = 1; i < data.length; i++) {
+    if (lkReportDateKey_(data[i][dIdx]) !== latest) continue;
+    if (String(data[i][vIdx] == null ? '' : data[i][vIdx]).trim() !== '') {
+      skipped++;
+      continue;
+    }
+    var art = String(data[i][aIdx] || '').trim().toLowerCase();
+    if (!art) continue;
+    var qty = parseFloat(String(data[i][qIdx]).replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(qty)) qty = 0;
+    byArt[art] = (byArt[art] || 0) + qty;
+    rows++;
+  }
+  return { byArt: byArt, date: latest, rows: rows, skipped: skipped };
+}
+
+function lkReportApplyStocks_(result, byArt) {
+  var key, art;
+  for (key in result) {
+    if (!Object.prototype.hasOwnProperty.call(result, key)) continue;
+    art = String(key.split('|')[0] || '').trim().toLowerCase();
+    result[key].stocks = byArt[art] || 0;
+  }
+}
+
+function lkReportDoneTitle_(title, pack) {
+  return title + '\nОстатки ЛК на ' + lkReportDateLabel_(pack.date) +
+    '\nСтрок без «Пострадавший»: ' + pack.rows +
+    '\nПропущено пострадавших строк: ' + pack.skipped;
+}
+
+function lkReportUseStocks_(ss, opt, title) {
+  opt = opt || {};
+  if (opt.stocksByArt) return opt;
+  var pack = lkReportStocksByArt_(ss);
+  if (!pack) return null;
+  opt.stocksByArt = pack.byArt;
+  if (!opt.doneTitle) opt.doneTitle = lkReportDoneTitle_(title, pack);
+  return opt;
+}
+
 function сформироватьОтчет_Заказы_Количество() {
   var html = '<!DOCTYPE html><html><head><style>' +
     'body{font-family:Arial;padding:16px;margin:0}' +
@@ -592,16 +685,18 @@ function runOrdersQtyKgReport(payload) {
 }
 
 function ordersQtyReportBuild_(opt) {
-  const kg = (opt && opt.kg) ? opt.kg : null;
+  opt = lkReportUseStocks_(SpreadsheetApp.getActiveSpreadsheet(), opt, "✅ Отчёт 'Количество заказов' обновлён");
+  if (!opt) return;
+  const kg = opt.kg ? opt.kg : null;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetName = "К-во заказов";
-  var startSheet = ss.getSheetByName(sheetName);
+  var sheetName = opt.sheetName ? opt.sheetName : "К-во заказов";
+  var periodName = opt.periodSheet ? opt.periodSheet : sheetName;
+  var startSheet = ss.getSheetByName(periodName);
   if (!startSheet) {
-    SpreadsheetApp.getUi().alert('❌ Лист «К-во заказов» не найден');
+    SpreadsheetApp.getUi().alert('❌ Лист «' + periodName + '» не найден');
     return;
   }
   const financeSheet = ss.getSheetByName("Финансовые_ежедневные");
-  const stocksSheet = ss.getSheetByName("Остатки");
   const goodsSheet = ss.getSheetByName("Товары");
   const manualPriceSheet = ss.getSheetByName("Товар+Вес"); // 🔥 ДОБАВЛЕНО
 
@@ -784,65 +879,8 @@ function ordersQtyReportBuild_(opt) {
     }
   }
 
-  // ============ 5. ЗАГРУЗКА ОСТАТКОВ ============
-  if (stocksSheet) {
-    const stocksValues = stocksSheet.getDataRange().getValues();
-    const stocksHeaders = stocksValues[0];
-    
-    let artIndex = -1;
-    let stockQtyIndex = -1;
-    let dateIndex = -1;
-    
-    for (let i = 0; i < stocksHeaders.length; i++) {
-      const header = stocksHeaders[i];
-      if (header === 'Артикул продавца') artIndex = i;
-      if (header === 'Остаток') stockQtyIndex = i;
-      if (header === 'Дата') dateIndex = i;
-    }
-    
-    if (artIndex !== -1 && stockQtyIndex !== -1 && dateIndex !== -1) {
-      const stocksByArt = {};
-      
-      for (let i = 1; i < stocksValues.length; i++) {
-        const art = stocksValues[i][artIndex];
-        if (!art) continue;
-        
-        const qty = parseFloat(stocksValues[i][stockQtyIndex]) || 0;
-        const dateValue = stocksValues[i][dateIndex];
-        const dateTime = dateValue ? new Date(dateValue).getTime() : 0;
-        
-        const artKey = String(art).toLowerCase();
-        
-        if (!stocksByArt[artKey]) {
-          stocksByArt[artKey] = {
-            maxDate: -1,
-            dateSums: {}
-          };
-        }
-        
-        const dateKey = dateTime;
-        if (!stocksByArt[artKey].dateSums[dateKey]) {
-          stocksByArt[artKey].dateSums[dateKey] = 0;
-        }
-        stocksByArt[artKey].dateSums[dateKey] += qty;
-        
-        if (dateTime > stocksByArt[artKey].maxDate) {
-          stocksByArt[artKey].maxDate = dateTime;
-        }
-      }
-      
-      for (const key in result) {
-        const art = key.split('|')[0];
-        const artLower = art.toLowerCase();
-        
-        if (stocksByArt[artLower] && stocksByArt[artLower].maxDate !== -1) {
-          const maxDate = stocksByArt[artLower].maxDate;
-          const sumOnMaxDate = stocksByArt[artLower].dateSums[maxDate] || 0;
-          result[key].stocks = sumOnMaxDate;
-        }
-      }
-    }
-  }
+  // ============ 5. ОСТАТКИ С «Остатки ЛК»: последняя дата, без пострадавших складов ============
+  lkReportApplyStocks_(result, opt.stocksByArt);
 
   // ============ 6. ФОРМИРОВАНИЕ ОТЧЕТА ============
   const currentYear = new Date().getFullYear();
@@ -1073,10 +1111,10 @@ function ordersQtyReportBuild_(opt) {
   if (kg) {
     formatCurrentSheet(sheet);
     try { sheet.activate(); } catch (eAct) {}
-    SpreadsheetApp.getUi().alert("✅ Отчёт 'Количество заказов' обновлён");
+    SpreadsheetApp.getUi().alert((opt && opt.doneTitle) || "✅ Отчёт 'Количество заказов' обновлён");
   } else {
     formatCurrentSheet();
-    SpreadsheetApp.getUi().alert("✅ Отчёт 'Количество заказов' обновлён");
+    SpreadsheetApp.getUi().alert((opt && opt.doneTitle) || "✅ Отчёт 'Количество заказов' обновлён");
   }
 }
 
@@ -1568,11 +1606,18 @@ function сформироватьОтчет_Заказы_Сумма() {
 }
 */
 
-function сформироватьОтчет_Заказы_Вес() {
+function сформироватьОтчет_Заказы_Вес(opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const startSheet = ss.getSheetByName("Вес заказов");
+  opt = lkReportUseStocks_(ss, opt, "✅ Отчёт 'Вес заказов' обновлён");
+  if (!opt) return;
+  const sheetName = opt.sheetName || "Вес заказов";
+  const periodName = opt.periodSheet || sheetName;
+  const startSheet = ss.getSheetByName(periodName);
+  if (!startSheet) {
+    SpreadsheetApp.getUi().alert('❌ Лист «' + periodName + '» не найден');
+    return;
+  }
   const financeSheet = ss.getSheetByName("Финансовые_ежедневные");
-  const stocksSheet = ss.getSheetByName("Остатки");
   const goodsSheet = ss.getSheetByName("Товары");
   const manualPriceSheet = ss.getSheetByName("Товар+Вес"); // 🔥 Новый лист
 
@@ -1583,8 +1628,6 @@ function сформироватьОтчет_Заказы_Вес() {
   const fromTime = dateFrom.getTime();
   const toTime = dateTo.getTime();
 
-  const sheetName = "Вес заказов";
-  
   const result = {};
   const datesObj = {};
 
@@ -1690,36 +1733,8 @@ function сформироватьОтчет_Заказы_Вес() {
     }
   }
 
-  // ============ 5. ОСТАТКИ ============
-  if (stocksSheet) {
-    const sValues = stocksSheet.getDataRange().getValues();
-    const sHeaders = sValues[0];
-    let aIdx = -1, qIdx = -1, dIdx = -1;
-    for (let i = 0; i < sHeaders.length; i++) {
-      if (sHeaders[i] === 'Артикул продавца') aIdx = i;
-      if (sHeaders[i] === 'Остаток') qIdx = i;
-      if (sHeaders[i] === 'Дата') dIdx = i;
-    }
-    
-    if (aIdx !== -1 && qIdx !== -1 && dIdx !== -1) {
-      const stMap = {};
-      for (let i = 1; i < sValues.length; i++) {
-        const a = sValues[i][aIdx];
-        if (!a) continue;
-        const q = parseFloat(sValues[i][qIdx]) || 0;
-        const t = sValues[i][dIdx] ? new Date(sValues[i][dIdx]).getTime() : 0;
-        const k = a.toString().toLowerCase();
-        if (!stMap[k]) stMap[k] = { maxT: -1, sums: {} };
-        if (!stMap[k].sums[t]) stMap[k].sums[t] = 0;
-        stMap[k].sums[t] += q;
-        if (t > stMap[k].maxT) stMap[k].maxT = t;
-      }
-      for (const key in result) {
-        const art = key.split('|')[0].toLowerCase();
-        if (stMap[art] && stMap[art].maxT !== -1) result[key].stocks = stMap[art].sums[stMap[art].maxT] || 0;
-      }
-    }
-  }
+  // ============ 5. ОСТАТКИ С «Остатки ЛК»: последняя дата, без пострадавших складов ============
+  lkReportApplyStocks_(result, opt.stocksByArt);
 
   // ============ 6. ФОРМИРОВАНИЕ ОТЧЕТА ============
   const curYear = new Date().getFullYear();
@@ -1826,8 +1841,8 @@ function сформироватьОтчет_Заказы_Вес() {
     sheet.getRange(startR, colMan, cntR, 1).setNumberFormat("#,##0.00");
   }
 
-  if (typeof formatCurrentSheet === 'function') formatCurrentSheet();
-  SpreadsheetApp.getUi().alert("✅ Отчёт 'Вес заказов' обновлён");
+  if (typeof formatCurrentSheet === 'function') formatCurrentSheet(opt.sheetName ? sheet : undefined);
+  SpreadsheetApp.getUi().alert(opt.doneTitle || "✅ Отчёт 'Вес заказов' обновлён");
 }
 
 function сформироватьОтчетРекламаИПродажи2() {

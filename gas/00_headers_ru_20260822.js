@@ -456,6 +456,7 @@ function wbRenameSheetHeaders_(sheet, map) {
     wbClearFilter_(sheet);
     sheet.getRange(1, 1, 1, lastCol).setValues([next]);
     sheet.getRange(1, 1, 1, lastCol).setFontWeight('bold');
+    if (typeof wbPutSheetFilter_ === 'function') wbPutSheetFilter_(sheet, 1);
   }
   return n;
 }

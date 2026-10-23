@@ -507,14 +507,20 @@ function wbClearFilter_(sheet) {
 
 function wbEnsureFilter_(sheet) {
   if (!sheet) return;
+  if (typeof wbPutFilter_ === 'function') {
+    try { wbPutFilter_(sheet, 1, 1, true); } catch (e) {
+      Logger.log('filter ' + sheet.getName() + ': ' + e);
+    }
+    return;
+  }
   try {
     wbClearFilter_(sheet);
     var lastRow = sheet.getLastRow();
     var lastCol = sheet.getLastColumn();
     if (lastRow < 1 || lastCol < 1) return;
     sheet.getRange(1, 1, lastRow, lastCol).createFilter();
-  } catch (e) {
-    Logger.log('filter ' + sheet.getName() + ': ' + e);
+  } catch (e2) {
+    Logger.log('filter ' + sheet.getName() + ': ' + e2);
   }
 }
 
