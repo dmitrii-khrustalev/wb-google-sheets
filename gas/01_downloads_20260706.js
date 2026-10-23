@@ -17,6 +17,7 @@ function onOpen() {
       .addItem('📦 Заказы', 'showOrdersDialog')
       .addItem('📦 Товары', 'loadAllProducts')
       .addItem('📦 Остатки', 'recordStocksFast')
+      .addItem('📦 Остатки ЛК', 'recordLkStocks')
       .addItem('📦 Выгрузка FBS', 'showFbsExportDialog')
       .addSeparator()
       .addSubMenu(ui.createMenu('🚚 FBW')
@@ -38,7 +39,6 @@ function onOpen() {
         .addItem('🔑 Ключ базы', 'setDbKey')
         .addItem('📊 Заполненность ячеек', 'countFilledCellsOnly'))
       .addSubMenu(ui.createMenu('🧪 Пробы')
-        .addItem('📦 Остатки ЛК (проба)', 'probeWarehouseRemains')
         .addItem('📦 Остатки CSV (проба)', 'probeStocksHistoryCsv')
         .addItem('💰 История цен (проба)', 'probePriceHistory'))
       .addToUi();
@@ -4714,16 +4714,21 @@ function runManualUpdate() {
 }
 
 // ============================================
-// ПРОБА: отчёт ЛК «Остатки на складе» (warehouse_remains)
-// Срез текущий, не архив. Пишет лист Остатки_ЛК_проба.
+// Остатки ЛК: отчёт кабинета warehouse_remains.
+// Длинный лист, как «Остатки»: день дописывается, повтор за сегодня перезаписывает этот день.
+// Листы «Остатки» и «В пути» не меняет.
 // ============================================
 function probeWarehouseRemains() {
+  recordLkStocks();
+}
+
+function recordLkStocks() {
   var token = getApiToken();
   if (!token) return;
 
   var host = 'https://seller-analytics-api.wildberries.ru';
   var dateStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  Logger.log('Остатки ЛК проба, дата среза ' + dateStr);
+  Logger.log('Остатки ЛК, дата среза ' + dateStr);
 
   var createUrl = host + '/api/v1/warehouse_remains'
     + '?locale=ru&groupByNm=true&groupBySa=true&groupBySize=true';
@@ -4766,7 +4771,7 @@ function probeWarehouseRemains() {
     }
   }
   if (String(status).toLowerCase() !== 'done') {
-    showAlert('Отчёт ещё не готов (статус: ' + (status || 'пусто') + '). Запустите пробу позже.');
+    showAlert('Отчёт ещё не готов (статус: ' + (status || 'пусто') + '). Запустите «Остатки ЛК» позже.');
     return;
   }
 
@@ -4788,88 +4793,174 @@ function probeWarehouseRemains() {
     return;
   }
 
-  var written = wrWriteProbeSheet_(dateStr, rowsJson);
+  var written = lkStocksWrite_(dateStr, rowsJson);
   showAlert(
-    '✅ Остатки ЛК (проба)\n' +
-    'Дата среза: ' + dateStr + '\n' +
-    'Товаров: ' + written.items + '\n' +
+    '✅ Остатки ЛК\n' +
+    'Дата: ' + dateStr + '\n' +
+    'Строк: ' + written.rows + '\n' +
     'Складов: ' + written.warehouses + '\n' +
-    'Лист: Остатки_ЛК_проба\n\n' +
-    written.whPreview
+    'Строк «в пути»: ' + written.transitRows + '\n' +
+    'Лист: Остатки ЛК\n\n' +
+    'Повтор за сегодня перезаписывает только эту дату.' +
+    (written.oldLeft ? '\n\nСтарый лист «Остатки_ЛК_проба» не трогал.' : '')
   );
 }
 
-function wrWriteProbeSheet_(dateStr, items) {
-  var aggFirst = [
-    'В пути до получателей',
-    'В пути возвраты на склад WB',
-    'Всего находится на складах'
-  ];
-  var seen = {};
-  var warehouses = [];
-  var a;
-  for (a = 0; a < aggFirst.length; a++) seen[aggFirst[a]] = true;
+var LK_STOCKS_SHEET_ = 'Остатки ЛК';
+var LK_STOCKS_SHEET_OLD_ = 'Остатки_ЛК_проба';
+var LK_STOCKS_HEADERS_ = [
+  'Дата', 'Артикул продавца', 'Название', 'Артикул WB', 'Предмет', 'Бренд', 'Размер',
+  'Склад', 'Остаток', 'Регион поставки', 'Вес, кг за 1 шт', 'Общий вес, кг',
+  'Штрихкод', 'Объём', 'В пути к покупателю', 'В пути возврат'
+];
 
-  var i, w, whs, name;
-  for (i = 0; i < items.length; i++) {
-    whs = (items[i] && items[i].warehouses) || [];
-    for (w = 0; w < whs.length; w++) {
-      name = whs[w] && whs[w].warehouseName ? String(whs[w].warehouseName) : '';
-      if (!name || seen[name]) continue;
-      seen[name] = true;
-      warehouses.push(name);
-    }
+/** Служебные имена отчёта ЛК — это не склады. */
+function lkWhKind_(name) {
+  var n = String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!n) return '';
+  if (n.indexOf('в пути до получател') === 0) return 'toClient';
+  if (n.indexOf('в пути возврат') === 0) return 'fromClient';
+  if (n.indexOf('всего находится на складах') === 0) return 'total';
+  return '';
+}
+
+function lkProduct_(dict, nmId) {
+  if (!dict) return {};
+  if (dict[nmId]) return dict[nmId];
+  var s = nmId != null ? String(nmId).trim() : '';
+  if (s && dict[s]) return dict[s];
+  var n = Number(s);
+  if (s && !isNaN(n) && dict[n]) return dict[n];
+  return {};
+}
+
+function lkStocksEnsureSheet_(ss) {
+  var sheet = ss.getSheetByName(LK_STOCKS_SHEET_);
+  if (sheet) return sheet;
+  var old = ss.getSheetByName(LK_STOCKS_SHEET_OLD_);
+  if (old) {
+    old.setName(LK_STOCKS_SHEET_);
+    return old;
   }
-  warehouses.sort(function(x, y) { return x.localeCompare(y, 'ru'); });
-  var whCols = aggFirst.concat(warehouses);
+  return ss.insertSheet(LK_STOCKS_SHEET_);
+}
 
-  var headers = [
-    'Дата среза', 'Бренд', 'Предмет', 'Артикул продавца', 'Артикул WB',
-    'Штрихкод', 'Размер', 'Объём'
-  ].concat(whCols);
+function lkStocksHeadersOk_(sheet) {
+  if (!sheet || sheet.getLastRow() < 1 || sheet.getLastColumn() < LK_STOCKS_HEADERS_.length) return false;
+  var h = sheet.getRange(1, 1, 1, LK_STOCKS_HEADERS_.length).getValues()[0];
+  var i;
+  for (i = 0; i < LK_STOCKS_HEADERS_.length; i++) {
+    if (String(h[i] || '').trim() !== LK_STOCKS_HEADERS_[i]) return false;
+  }
+  return true;
+}
 
-  var out = [headers];
+function lkStocksWrite_(dateStr, items) {
+  var productsDict = getProductsDictionary();
+  var regionMap = getRegionMap();
+  var weightsMap = loadWeightsMapForStocks();
+  var rows = [];
+  var seenWh = {};
+  var transitRows = 0;
+  var i, w, it, whs, name, kind, q, product, vendorCode, weightPerUnit;
+  var nmId, title, subject, brand, size, barcode, volume;
+  var toClient, fromClient, whQty, whOrder, amount, region, totalWeight;
+
   for (i = 0; i < items.length; i++) {
-    var it = items[i] || {};
-    var qty = {};
+    it = items[i] || {};
+    nmId = it.nmId != null ? it.nmId : '';
+    product = lkProduct_(productsDict, nmId);
+    vendorCode = it.vendorCode ? String(it.vendorCode).trim() : '';
+    if (!vendorCode && product.vendorCode) vendorCode = String(product.vendorCode).trim();
+    weightPerUnit = (vendorCode && weightsMap[vendorCode]) ? weightsMap[vendorCode] : 0;
+    title = product.title || '';
+    subject = it.subjectName || product.subject || '';
+    brand = it.brand || product.brand || '';
+    size = it.techSize != null && it.techSize !== '' ? String(it.techSize) : '';
+    barcode = it.barcode != null && it.barcode !== '' ? String(it.barcode) : '';
+    volume = it.volume != null && it.volume !== '' ? it.volume : '';
+
+    toClient = 0;
+    fromClient = 0;
+    whQty = {};
+    whOrder = [];
     whs = it.warehouses || [];
     for (w = 0; w < whs.length; w++) {
-      name = whs[w] && whs[w].warehouseName ? String(whs[w].warehouseName) : '';
-      if (name) qty[name] = whs[w].quantity;
+      name = whs[w] && whs[w].warehouseName ? String(whs[w].warehouseName).trim() : '';
+      if (!name) continue;
+      kind = lkWhKind_(name);
+      q = Number(whs[w].quantity);
+      if (isNaN(q)) q = 0;
+      if (kind === 'toClient') { toClient += q; continue; }
+      if (kind === 'fromClient') { fromClient += q; continue; }
+      if (kind === 'total') continue;
+      if (whQty[name] == null) whOrder.push(name);
+      whQty[name] = (whQty[name] || 0) + q;
     }
-    var row = [
-      dateStr,
-      it.brand || '',
-      it.subjectName || '',
-      it.vendorCode || '',
-      it.nmId || '',
-      it.barcode || '',
-      it.techSize || '',
-      it.volume != null ? it.volume : ''
-    ];
-    for (w = 0; w < whCols.length; w++) {
-      row.push(qty[whCols[w]] != null ? qty[whCols[w]] : '');
+
+    for (w = 0; w < whOrder.length; w++) {
+      name = whOrder[w];
+      amount = whQty[name];
+      if (!(amount > 0)) continue;
+      seenWh[name] = true;
+      region = getRegionFromMap(name, regionMap);
+      totalWeight = weightPerUnit * amount;
+      rows.push([
+        dateStr, vendorCode, title, nmId, subject, brand, size,
+        name, amount, region, weightPerUnit, totalWeight,
+        barcode, volume, '', ''
+      ]);
     }
-    out.push(row);
+
+    if (toClient > 0 || fromClient > 0) {
+      transitRows++;
+      rows.push([
+        dateStr, vendorCode, title, nmId, subject, brand, size,
+        '', '', '', weightPerUnit, '',
+        barcode, volume,
+        toClient > 0 ? toClient : '',
+        fromClient > 0 ? fromClient : ''
+      ]);
+    }
   }
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Остатки_ЛК_проба');
-  if (sheet) {
-    if (typeof wbClearFilter_ === 'function') wbClearFilter_(sheet);
+  var sheet = lkStocksEnsureSheet_(ss);
+  var oldLeft = !!ss.getSheetByName(LK_STOCKS_SHEET_OLD_);
+  if (typeof wbClearFilter_ === 'function') wbClearFilter_(sheet);
+  if (!lkStocksHeadersOk_(sheet)) {
     sheet.clear();
-  } else {
-    sheet = ss.insertSheet('Остатки_ЛК_проба');
+    sheet.getRange(1, 1, 1, LK_STOCKS_HEADERS_.length).setValues([LK_STOCKS_HEADERS_]);
+    sheet.getRange(1, 1, 1, LK_STOCKS_HEADERS_.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setTabColor(null);
   }
-  sheet.getRange(1, 1, out.length, headers.length).setValues(out);
-  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-  sheet.setFrozenRows(1);
-  sheet.setTabColor('#f4cccc');
 
-  var preview = whCols.slice(0, 12).join(', ');
-  if (whCols.length > 12) preview += ' …';
-  Logger.log('склады (' + whCols.length + '): ' + whCols.join(' | '));
-  return { items: items.length, warehouses: whCols.length, whPreview: preview };
+  var removed = stocksRemoveDate_(sheet, LK_STOCKS_HEADERS_, dateStr);
+  if (rows.length) {
+    var startRow = sheet.getLastRow() + 1;
+    var b, batch;
+    for (b = 0; b < rows.length; b += 1000) {
+      batch = rows.slice(b, b + 1000);
+      sheet.getRange(startRow + b, 1, batch.length, LK_STOCKS_HEADERS_.length).setValues(batch);
+    }
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      sheet.getRange(2, 11, lastRow - 1, 1).setNumberFormat('0.000');
+      sheet.getRange(2, 12, lastRow - 1, 1).setNumberFormat('0.00');
+    }
+  }
+
+  var whNames = Object.keys(seenWh);
+  whNames.sort(function(a, c) { return a.localeCompare(c, 'ru'); });
+  Logger.log('Остатки ЛК: снято ' + removed + ', записано ' + rows.length + ', склады (' + whNames.length + '): ' + whNames.join(' | '));
+  return {
+    rows: rows.length,
+    warehouses: whNames.length,
+    transitRows: transitRows,
+    removed: removed,
+    oldLeft: oldLeft
+  };
 }
 
 function wrFetchJson_(token, url, method, body) {
@@ -4891,7 +4982,7 @@ function wrFetchJson_(token, url, method, body) {
 
 // ============================================
 // ПРОБА: CSV STOCK_HISTORY_DAILY_CSV (история остатков analytics)
-// Сравнить склады с листом Остатки_ЛК_проба и wb-warehouses.
+// Сравнить склады с листом Остатки ЛК и wb-warehouses.
 // ============================================
 
 function probeStocksHistoryCsv() {
@@ -4989,7 +5080,7 @@ function probeStocksHistoryCsvRun(dateFrom, dateTo) {
     'Складов в CSV: ' + parsed.warehouses.length + '\n' +
     'Шапка: ' + parsed.headerLine + '\n\n' +
     'Листы: Остатки_CSV_проба, Остатки_склады_сравнение\n' +
-    (cmp.lkFound ? ('Складов на ЛК-листе: ' + cmp.lkCount + ', совпало имён: ' + cmp.exact + '\n') : 'ЛК-лист Остатки_ЛК_проба не найден — сначала запустите «Остатки ЛК (проба)»\n') +
+    (cmp.lkFound ? ('Складов на ЛК-листе: ' + cmp.lkCount + ', совпало имён: ' + cmp.exact + '\n') : 'Лист «Остатки ЛК» не найден — сначала запустите «Остатки ЛК»\n') +
     'Склады CSV: ' + parsed.warehouses.slice(0, 12).join(', ') +
     (parsed.warehouses.length > 12 ? ' …' : '');
 }
@@ -5256,18 +5347,35 @@ function shCsvWriteSheets_(ss, dateFrom, dateTo, parsed) {
 }
 
 function shCsvLkWarehouses_(ss) {
-  var sheet = ss.getSheetByName('Остатки_ЛК_проба');
+  var sheet = ss.getSheetByName('Остатки ЛК') || ss.getSheetByName('Остатки_ЛК_проба');
   if (!sheet || sheet.getLastRow() < 1) return [];
   var lastCol = sheet.getLastColumn();
-  if (lastCol < 9) return [];
+  if (lastCol < 1) return [];
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  var wh = [];
-  var h;
-  for (h = 8; h < headers.length; h++) {
-    var name = String(headers[h] || '').trim();
-    if (name) wh.push(name);
+  var whIdx = -1;
+  var h, name, i;
+  for (h = 0; h < headers.length; h++) {
+    if (String(headers[h] || '').trim() === 'Склад') { whIdx = h; break; }
   }
-  return wh;
+  if (whIdx >= 0 && sheet.getLastRow() >= 2) {
+    var vals = sheet.getRange(2, whIdx + 1, sheet.getLastRow() - 1, 1).getValues();
+    var seen = {};
+    var wh = [];
+    for (i = 0; i < vals.length; i++) {
+      name = String(vals[i][0] || '').trim();
+      if (!name || seen[name] || lkWhKind_(name)) continue;
+      seen[name] = true;
+      wh.push(name);
+    }
+    return wh;
+  }
+  if (lastCol < 9) return [];
+  var wide = [];
+  for (h = 8; h < headers.length; h++) {
+    name = String(headers[h] || '').trim();
+    if (name && !lkWhKind_(name)) wide.push(name);
+  }
+  return wide;
 }
 
 function shCsvCompareWarehouses_(ss, csvWarehouses) {
@@ -6800,7 +6908,7 @@ function сброситьФильтрыНаВсехЛистах() {
  */
 var WB_FILTER_ALWAYS_ = [
   'Финансовые_ежедневные', 'Рекламные_расходы', 'Воронка продаж', 'Заказы', 'Товары',
-  'Остатки', 'В пути', 'Поставки_список', 'Детали_поставок', 'Товары_поставок',
+  'Остатки', 'Остатки ЛК', 'В пути', 'Поставки_список', 'Детали_поставок', 'Товары_поставок',
   'Поставки', 'ЗаказыЛК',
   'FBS Остатки', 'FBS Заказы', 'FBS Поставки', 'FBS Поставка_состав',
   'FBS Офисы', 'FBS Склады'
@@ -6888,6 +6996,7 @@ function fixWarehouseNamesSmart() {
     { sheet: "Финансовые_ежедневные", cols: ["office_name"] },
     { sheet: "Заказы", cols: ["warehouseName"] },
     { sheet: "Остатки", cols: ["Склад"] },
+    { sheet: "Остатки ЛК", cols: ["Склад"] },
     { sheet: "В пути", cols: ["Склад"] },
     { sheet: "Склады_WB", cols: ["Название"] },
     { sheet: "Транзитные_тарифы", cols: ["Откуда", "Куда"] },
@@ -7006,6 +7115,7 @@ function fixWarehouseNames() {
     { sheet: "Финансовые_ежедневные", cols: ["office_name"] },
     { sheet: "Заказы", cols: ["warehouseName"] },
     { sheet: "Остатки", cols: ["Склад"] },
+    { sheet: "Остатки ЛК", cols: ["Склад"] },
     { sheet: "В пути", cols: ["Склад"] },
     { sheet: "Склады_WB", cols: ["Название"] },
     { sheet: "Транзитные_тарифы", cols: ["Откуда", "Куда"] },
@@ -7124,6 +7234,7 @@ function fixWarehouseNames2() {
     { sheet: "Финансовые_ежедневные", cols: ["office_name"] },
     { sheet: "Заказы", cols: ["warehouseName"] },
     { sheet: "Остатки", cols: ["Склад"] },
+    { sheet: "Остатки ЛК", cols: ["Склад"] },
     { sheet: "В пути", cols: ["Склад"] },
     { sheet: "Склады_WB", cols: ["Название"] },
     { sheet: "Транзитные_тарифы", cols: ["Откуда", "Куда"] },
@@ -7229,6 +7340,7 @@ function fixWarehouseNamesLastDate() {
     { sheet: "Финансовые_ежедневные", cols: ["office_name"], dateCol: "Дата" },
     { sheet: "Заказы", cols: ["warehouseName"], dateCol: "Дата" },
     { sheet: "Остатки", cols: ["Склад"], dateCol: "Дата" },
+    { sheet: "Остатки ЛК", cols: ["Склад"], dateCol: "Дата" },
     { sheet: "В пути", cols: ["Склад"], dateCol: null },           // 🔥 без фильтра
     { sheet: "Склады_WB", cols: ["Название"], dateCol: null },     // 🔥 без фильтра
     { sheet: "Транзитные_тарифы", cols: ["Откуда", "Куда"], dateCol: null }, // 🔥 без фильтра
@@ -7360,6 +7472,7 @@ function fixWarehouseNamesLastDate2() {
     { sheet: "Финансовые_ежедневные", cols: ["office_name"], dateCol: "Дата" },
     { sheet: "Заказы", cols: ["warehouseName"], dateCol: "Дата" },
     { sheet: "Остатки", cols: ["Склад"], dateCol: "Дата" },
+    { sheet: "Остатки ЛК", cols: ["Склад"], dateCol: "Дата" },
     { sheet: "В пути", cols: ["Склад"], dateCol: null },
     { sheet: "Склады_WB", cols: ["Название"], dateCol: null },
     { sheet: "Транзитные_тарифы", cols: ["Откуда", "Куда"], dateCol: null },
