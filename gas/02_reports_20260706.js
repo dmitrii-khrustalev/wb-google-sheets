@@ -648,9 +648,9 @@ function сформироватьОтчет_Заказы_Количество() 
     '.info{background:#e3f2fd;padding:8px;margin:0 0 8px;border-radius:4px;font-size:12px}' +
     '</style></head><body>' +
     '<h3>Цена за 1 кг</h3>' +
-    '<div class="info">Лист «К-во заказов». Вес берётся из «Товар+Вес» по артикулу. Все поля — в рублях.</div>' +
-    '<label>Комиссия сервиса, ₽</label><input id="commission" inputmode="decimal">' +
-    '<label>Продвижение, ₽</label><input id="promo" inputmode="decimal">' +
+    '<div class="info">Лист «К-во заказов». Вес берётся из «Товар+Вес» по артикулу. Комиссия и продвижение — в процентах, остальные поля — в рублях.</div>' +
+    '<label>Комиссия сервиса, %</label><input id="commission" inputmode="decimal">' +
+    '<label>Продвижение, %</label><input id="promo" inputmode="decimal">' +
     '<label>Возврат, ₽</label><input id="returnRub" inputmode="decimal">' +
     '<label>Хранение, ₽</label><input id="storage" inputmode="decimal">' +
     '<label>Приемка, ₽</label><input id="acceptance" inputmode="decimal">' +
@@ -937,6 +937,7 @@ function ordersQtyReportBuild_(opt) {
     if (kg) {
       var wKg = weightMap[String(parts[0]).trim().toLowerCase()] || 0;
       avgKg = ordersPricePerKg_(item.avgPrice, kg, wKg);
+      if (typeof avgKg === 'number' && avgKg < 0) avgKg = '';
       curKg = ordersPricePerKg_(item.currentPrice, kg, wKg);
       manKg = ordersPricePerKg_(item.manualPrice, kg, wKg);
     }
@@ -975,8 +976,13 @@ function ordersQtyReportBuild_(opt) {
   const curT = totalQty > 0 ? twCur / totalQty : 0;
   const manT = totalQty > 0 ? twMan / totalQty : 0;
   
+  var avgKgTotal = '';
+  if (kg && qtyAvgKg > 0) {
+    avgKgTotal = twAvgKg / qtyAvgKg;
+    if (avgKgTotal < 0) avgKgTotal = '';
+  }
   const totalRow = ["Итого", "", ...colTotals, grand, grandReturns, grandStocks, avgT];
-  if (kg) totalRow.push(qtyAvgKg > 0 ? twAvgKg / qtyAvgKg : '');
+  if (kg) totalRow.push(avgKgTotal);
   totalRow.push(curT);
   if (kg) totalRow.push(qtyCurKg > 0 ? twCurKg / qtyCurKg : '');
   totalRow.push(manT);
@@ -2309,6 +2315,21 @@ function formatCurrentSheet(optSheet) {
         .setBackground("#ff0000")
         .setFontColor("#000000")
         .setRanges([range])
+        .build()
+    );
+  }
+
+  if (текКгCol !== -1 && ценаКгCol !== -1 && lastRow >= dataStartRow) {
+    const curKgLet = columnToLetter(текКгCol);
+    const manKgLet = columnToLetter(ценаКгCol);
+    const kgRange = sheet.getRange(dataStartRow, текКгCol, lastRow - dataStartRow + 1, 1);
+    const kgFormula = '=AND(' + curKgLet + dataStartRow + '<>"";' + curKgLet + dataStartRow + '<' + manKgLet + dataStartRow + ')';
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(kgFormula)
+        .setBackground("#ff0000")
+        .setFontColor("#000000")
+        .setRanges([kgRange])
         .build()
     );
   }
