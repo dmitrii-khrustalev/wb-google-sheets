@@ -3807,19 +3807,6 @@ function saveSuppliesListToSheet(supplies) {
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
   
-  // 🔥 Функция парсинга даты из строки API в объект Date
-  function parseApiDate(dateStr) {
-    if (!dateStr) return null;
-    if (dateStr instanceof Date) return dateStr;
-    
-    var str = dateStr.toString();
-    // Формат: "2025-03-18 7:07:39" или "2025-03-18T07:07:39"
-    var cleanStr = str.replace(' ', 'T');
-    var d = new Date(cleanStr);
-    
-    return isNaN(d.getTime()) ? null : d;
-  }
-  
   var rows = [];
   for (var i = 0; i < supplies.length; i++) {
     var row = [];
@@ -3827,17 +3814,11 @@ function saveSuppliesListToSheet(supplies) {
       var val = supplies[i][headers[j]];
       var headerName = headers[j];
       
-      // 🔥 Превращаем строки дат в объекты Date
-      // if ((headerName === 'createDate' || headerName === 'supplyDate' || 
-      //      headerName === 'factDate' || headerName === 'updatedDate') && val) {
-      //   row.push(parseApiDate(val));
-      // Стало:
       if ((typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(headerName) :
           (headerName === 'createDate' || headerName === 'supplyDate' ||
           headerName === 'factDate' || headerName === 'updatedDate' ||
           headerName.indexOf('Date') !== -1)) && val) {
-        var dateObj = parseApiDate(val);  // ✅ Превращает в объект Date
-        row.push(dateObj || val);
+        row.push(sheetDateCell_(val));
       } else if (val === null || val === undefined) {
         row.push('');
       } else if (typeof val === 'object') {
@@ -3850,15 +3831,7 @@ function saveSuppliesListToSheet(supplies) {
   }
   
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  
-  // 🔥 Форматируем столбцы с датами для отображения
-  var dateCols = ['createDate', 'supplyDate', 'factDate', 'updatedDate'];
-  for (var k = 0; k < dateCols.length; k++) {
-    var colIndex = (typeof wbColIdx_ === 'function' ? wbColIdx_(headers, [dateCols[k]]) : headers.indexOf(dateCols[k])) + 1;
-    if (colIndex > 0) {
-      sheet.getRange(2, colIndex, rows.length, 1).setNumberFormat('dd.mm.yyyy');
-    }
-  }
+  formatSheetDateCols_(sheet, headers, 2, rows.length);
   
   sheet.autoResizeColumns(1, headers.length);
   wbPutSheetFilter_(sheet);
@@ -3981,16 +3954,6 @@ function saveDetailsToSheet(details) {
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
   
-  // 🔥 Функция парсинга даты
-  function parseApiDate(dateStr) {
-    if (!dateStr) return null;
-    if (dateStr instanceof Date) return dateStr;
-    var str = dateStr.toString();
-    var cleanStr = str.replace(' ', 'T');
-    var d = new Date(cleanStr);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  
   var rows = [];
   for (var i = 0; i < details.length; i++) {
     var row = [];
@@ -3998,12 +3961,11 @@ function saveDetailsToSheet(details) {
       var val = details[i][headers[j]];
       var headerName = headers[j];
       
-      // 🔥 Превращаем строки дат в объекты Date
       if ((typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(headerName) :
           (headerName.indexOf('Date') !== -1 ||
            headerName === 'createDate' || headerName === 'supplyDate' ||
            headerName === 'factDate' || headerName === 'updatedDate')) && val) {
-        row.push(parseApiDate(val));
+        row.push(sheetDateCell_(val));
       } else if (val === null || val === undefined) {
         row.push('');
       } else if (typeof val === 'object') {
@@ -4015,16 +3977,7 @@ function saveDetailsToSheet(details) {
     rows.push(row);
   }
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  
-  // 🔥 Форматируем все столбцы с датами
-  for (var j = 0; j < headers.length; j++) {
-    if (typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(headers[j]) :
-        (headers[j].indexOf('Date') !== -1 ||
-        headers[j] === 'createDate' || headers[j] === 'supplyDate' ||
-        headers[j] === 'factDate' || headers[j] === 'updatedDate')) {
-      sheet.getRange(2, j + 1, rows.length, 1).setNumberFormat('dd.mm.yyyy');
-    }
-  }
+  formatSheetDateCols_(sheet, headers, 2, rows.length);
   
   sheet.autoResizeColumns(1, headers.length);
   wbPutSheetFilter_(sheet);
@@ -4189,52 +4142,10 @@ function createUnifiedSuppliesSheet() {
   unifiedSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
   unifiedSheet.setFrozenRows(1);
   
-  // Функция преобразования текстовой даты в объект Date
-  function parseDateToNumber(dateString) {
-    if (!dateString) return null;
-    if (dateString instanceof Date) return dateString;
-    if (typeof dateString === 'string') {
-      var parts = dateString.split('.');
-      if (parts.length === 3) {
-        var day = parseInt(parts[0], 10);
-        var month = parseInt(parts[1], 10) - 1;
-        var year = parseInt(parts[2], 10);
-        return new Date(year, month, day);
-      }
-    }
-    return null;
-  }
-  
-  // Функция форматирования даты для отображения (только для заголовка)
-  function formatDateForDisplay(dateObj) {
-    if (!dateObj) return '';
-    if (!(dateObj instanceof Date)) return dateObj;
-    var day = dateObj.getDate().toString().padStart(2, '0');
-    var month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
-    var year = dateObj.getFullYear();
-    return day + '.' + month + '.' + year;
-  }
-  
   var allRows = [];
   for (var i = 0; i < suppliesRows.length; i++) {
     var supply = suppliesRows[i];
     var supplyId = getValueByHeader(supply, suppliesHeaders, 'supplyID');
-    
-    // Получаем сырые даты и преобразуем в объекты Date
-    var createDateRaw = getValueByHeader(supply, suppliesHeaders, 'createDate');
-    var supplyDateRaw = getValueByHeader(supply, suppliesHeaders, 'supplyDate');
-    var factDateRaw = getValueByHeader(supply, suppliesHeaders, 'factDate');
-    
-    // Преобразуем в объекты Date (числовые значения)
-    var createDateObj = parseDateToNumber(createDateRaw);
-    var supplyDateObj = parseDateToNumber(supplyDateRaw);
-    var factDateObj = parseDateToNumber(factDateRaw);
-    
-    // Для отображения в заголовке используем форматированную строку
-    var createDateDisplay = formatDateForDisplay(createDateObj);
-    var supplyDateDisplay = formatDateForDisplay(supplyDateObj);
-    var factDateDisplay = formatDateForDisplay(factDateObj);
-    
     var details = detailsMap[supplyId];
     var warehouseName = 'Не указан';
     if (details) {
@@ -4245,13 +4156,16 @@ function createUnifiedSuppliesSheet() {
     
     var region = getRegionFromMap(warehouseName, regionMap);
     var goods = goodsMap[supplyId] || [];
+    var createDateObj = sheetDateCell_(getValueByHeader(supply, suppliesHeaders, 'createDate')) || sheetDateCell_(details ? getValueByHeader(details, detailsHeaders, 'createDate') : '');
+    var supplyDateObj = sheetDateCell_(getValueByHeader(supply, suppliesHeaders, 'supplyDate')) || sheetDateCell_(details ? getValueByHeader(details, detailsHeaders, 'supplyDate') : '');
+    var factDateObj = sheetDateCell_(getValueByHeader(supply, suppliesHeaders, 'factDate')) || sheetDateCell_(details ? getValueByHeader(details, detailsHeaders, 'factDate') : '');
     
     var baseRow = [
       supplyId,
       getValueByHeader(supply, suppliesHeaders, 'preorderID'),
-      createDateObj,    // Объект Date (число)
-      supplyDateObj,    // Объект Date (число)
-      factDateObj,      // Объект Date (число)
+      createDateObj,
+      supplyDateObj,
+      factDateObj,
       getStatusName(getValueByHeader(supply, suppliesHeaders, 'statusID')),
       getBoxTypeName(getValueByHeader(supply, suppliesHeaders, 'boxTypeID')),
       warehouseName,
@@ -4305,20 +4219,7 @@ function createUnifiedSuppliesSheet() {
       unifiedSheet.getRange(2, totalWeightColumnIndex, allRows.length, 1).setNumberFormat('0.00');
     }
     
-    // Форматируем столбцы с датами (числовой формат для отображения)
-    var createDateColIndex = headers.indexOf('Дата создания') + 1;
-    var supplyDateColIndex = headers.indexOf('Дата поставки') + 1;
-    var factDateColIndex = headers.indexOf('Факт дата') + 1;
-    
-    if (createDateColIndex > 0) {
-      unifiedSheet.getRange(2, createDateColIndex, allRows.length, 1).setNumberFormat('dd.mm.yyyy');
-    }
-    if (supplyDateColIndex > 0) {
-      unifiedSheet.getRange(2, supplyDateColIndex, allRows.length, 1).setNumberFormat('dd.mm.yyyy');
-    }
-    if (factDateColIndex > 0) {
-      unifiedSheet.getRange(2, factDateColIndex, allRows.length, 1).setNumberFormat('dd.mm.yyyy');
-    }
+    formatSheetDateCols_(unifiedSheet, headers, 2, allRows.length);
   }
   
   // Сортируем лист "Поставки" по дате поставки
@@ -4339,24 +4240,181 @@ function createUnifiedSuppliesSheet() {
 // ЕЖЕДНЕВНОЕ ОБНОВЛЕНИЕ ПОСТАВОК
 // ============================================
 
-// 🔥 Универсальный парсер дат (ISO, DD.MM.YYYY, JS Date)
+function spreadsheetTz_() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) {
+      var tz = ss.getSpreadsheetTimeZone();
+      if (tz) return tz;
+    }
+  } catch (e) {}
+  return Session.getScriptTimeZone() || 'Europe/Moscow';
+}
+
+// Календарная дата без времени, в часовом поясе таблицы. Пусто и «0001-01-01» → null.
 function parseToJSDate(val) {
-  if (!val) return null;
-  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
-  
-  var str = val.toString().trim();
-  
-  // Формат DD.MM.YYYY или DD.MM.YYYY HH:MM:SS
-  var mDD = str.match(/^(\d{2})\.(\d{2})\.(\d{4})(\s+(\d{1,2}):(\d{2}):(\d{2}))?$/);
-  if (mDD) {
-    var d = new Date(parseInt(mDD[3]), parseInt(mDD[2]) - 1, parseInt(mDD[1]),
-                     mDD[5] ? parseInt(mDD[5]) : 0, mDD[6] ? parseInt(mDD[6]) : 0, mDD[7] ? parseInt(mDD[7]) : 0);
-    return isNaN(d.getTime()) ? null : d;
+  if (val === null || val === undefined || val === '') return null;
+  var tz = spreadsheetTz_();
+  var d = null;
+
+  if (Object.prototype.toString.call(val) === '[object Date]') {
+    if (isNaN(val.getTime())) return null;
+    d = val;
+  } else if (typeof val === 'number' && isFinite(val)) {
+    if (val > 20000 && val < 80000) {
+      var utc = new Date(Date.UTC(1899, 11, 30) + Math.round(val * 86400000));
+      try {
+        d = Utilities.parseDate(Utilities.formatDate(utc, 'UTC', 'yyyy-MM-dd'), tz, 'yyyy-MM-dd');
+      } catch (eSerial) {
+        d = null;
+      }
+    } else if (val > 1e11) {
+      d = new Date(val);
+    } else {
+      return null;
+    }
+  } else {
+    var str = String(val).trim();
+    if (!str || str.toLowerCase() === 'null' || str === '-' || str === 'undefined') return null;
+    var m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+    var isoDay = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    try {
+      if (m) {
+        var dd = ('0' + m[1]).slice(-2);
+        var mm = ('0' + m[2]).slice(-2);
+        d = Utilities.parseDate(dd + '.' + mm + '.' + m[3], tz, 'dd.MM.yyyy');
+      } else if (isoDay && !(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(str))) {
+        d = Utilities.parseDate(isoDay[1] + '-' + isoDay[2] + '-' + isoDay[3], tz, 'yyyy-MM-dd');
+      } else {
+        var parsed = new Date(str.indexOf(' ') >= 0 && str.indexOf('T') < 0 ? str.replace(' ', 'T') : str);
+        if (!isNaN(parsed.getTime())) d = parsed;
+      }
+    } catch (eParse) {
+      d = null;
+    }
   }
-  
-  // Формат ISO или стандартный
-  var d = new Date(str.replace(' ', 'T'));
-  return isNaN(d.getTime()) ? null : d;
+
+  if (!d || isNaN(d.getTime())) return null;
+  var ymd;
+  try {
+    ymd = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+  } catch (eFmt) {
+    return null;
+  }
+  var year = parseInt(ymd.slice(0, 4), 10);
+  if (!(year >= 2000 && year <= 2100)) return null;
+  try {
+    return Utilities.parseDate(ymd, tz, 'yyyy-MM-dd');
+  } catch (eOut) {
+    return null;
+  }
+}
+
+function sheetDateCell_(val) {
+  var d = parseToJSDate(val);
+  return d ? d : '';
+}
+
+function formatSheetDateCols_(sheet, headers, startRow, numRows) {
+  if (!sheet || !headers || !numRows || numRows < 1 || startRow < 1) return;
+  for (var j = 0; j < headers.length; j++) {
+    var h = headers[j];
+    var isDate = typeof wbIsApiDateField_ === 'function' && wbIsApiDateField_(h);
+    if (!isDate && h) {
+      var name = String(h).trim();
+      isDate = name === 'Дата создания' || name === 'Дата поставки' || name === 'Факт дата';
+    }
+    if (isDate) sheet.getRange(startRow, j + 1, numRows, 1).setNumberFormat('dd.mm.yyyy');
+  }
+}
+
+function refreshSuppliesListFromApi_(sheet, supplies) {
+  if (!sheet || !supplies || !supplies.length || sheet.getLastRow() < 2) return 0;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var idCol = typeof wbColIdx_ === 'function' ? wbColIdx_(headers, ['supplyID']) : headers.indexOf('supplyID');
+  if (idCol < 0) return 0;
+  var fields = ['createDate', 'supplyDate', 'factDate', 'updatedDate', 'statusID'];
+  var cols = [];
+  for (var f = 0; f < fields.length; f++) {
+    cols.push(typeof wbColIdx_ === 'function' ? wbColIdx_(headers, [fields[f]]) : headers.indexOf(fields[f]));
+  }
+  var height = sheet.getLastRow() - 1;
+  var data = sheet.getRange(2, 1, height, headers.length).getValues();
+  var byId = {};
+  for (var i = 0; i < supplies.length; i++) {
+    var sid = supplies[i] && supplies[i].supplyID;
+    if (sid != null && sid !== '') byId[String(sid)] = supplies[i];
+  }
+  var changed = 0;
+  for (var r = 0; r < data.length; r++) {
+    var rowId = data[r][idCol];
+    if (rowId == null || rowId === '') continue;
+    var src = byId[String(rowId)];
+    if (!src) continue;
+    for (var c = 0; c < fields.length; c++) {
+      if (cols[c] < 0) continue;
+      var raw = typeof wbCell_ === 'function' ? wbCell_(src, fields[c]) : src[fields[c]];
+      var isDate = c < 4;
+      var next = isDate ? sheetDateCell_(raw) : (raw == null || raw === '' ? '' : raw);
+      var cur = data[r][cols[c]];
+      if (isDate && !next) {
+        if (sheetDateCell_(cur) || cur === '' || cur == null) continue;
+        data[r][cols[c]] = '';
+        changed++;
+        continue;
+      }
+      if (cur instanceof Date && next instanceof Date && cur.getTime() === next.getTime()) continue;
+      if (!(cur instanceof Date) && !(next instanceof Date) && String(cur) === String(next)) continue;
+      data[r][cols[c]] = next;
+      changed++;
+    }
+  }
+  if (!changed) return 0;
+  sheet.getRange(2, 1, height, headers.length).setValues(data);
+  formatSheetDateCols_(sheet, headers, 2, height);
+  Logger.log('Поставки_список: обновлены даты и статусы, ячеек: ' + changed);
+  return changed;
+}
+
+function flushSupplyDatePatches_(sheet, headers, patches) {
+  if (!sheet || !patches || !patches.length) return;
+  var fields = ['createDate', 'supplyDate', 'factDate', 'updatedDate'];
+  for (var f = 0; f < fields.length; f++) {
+    var col = typeof wbColIdx_ === 'function' ? wbColIdx_(headers, [fields[f]]) : headers.indexOf(fields[f]);
+    if (col < 0) continue;
+    var byRow = {};
+    var minR = 0;
+    var maxR = 0;
+    for (var i = 0; i < patches.length; i++) {
+      var rowNum = patches[i].row;
+      if (!rowNum) continue;
+      byRow[rowNum] = patches[i][fields[f]];
+      if (!minR || rowNum < minR) minR = rowNum;
+      if (rowNum > maxR) maxR = rowNum;
+    }
+    if (!minR) continue;
+    var range = sheet.getRange(minR, col + 1, maxR - minR + 1, 1);
+    var vals = range.getValues();
+    var touched = false;
+    for (var r = minR; r <= maxR; r++) {
+      if (!Object.prototype.hasOwnProperty.call(byRow, r)) continue;
+      var next = sheetDateCell_(byRow[r]);
+      var cur = vals[r - minR][0];
+      if (!next) {
+        if (sheetDateCell_(cur) || cur === '' || cur == null) continue;
+        vals[r - minR][0] = '';
+        touched = true;
+        continue;
+      }
+      if (cur instanceof Date && cur.getTime() === next.getTime()) continue;
+      vals[r - minR][0] = next;
+      touched = true;
+    }
+    if (touched) {
+      range.setValues(vals);
+      range.setNumberFormat('dd.mm.yyyy');
+    }
+  }
 }
 
 function updateSuppliesDaily() {
@@ -4410,8 +4468,15 @@ function updateSuppliesDaily() {
       refreshIds.push(newId);
     }
   }
+  var listSheet = ss.getSheetByName('Поставки_список');
+  var datesChanged = listSheet ? refreshSuppliesListFromApi_(listSheet, freshSupplies) : 0;
   if (!refreshIds.length) {
     Logger.log('✅ Поставки: новых и активных нет (' + dateFrom + ' — ' + dateTo + ')');
+    if (datesChanged && !(typeof morningChainOn_ === 'function' && morningChainOn_())) {
+      rebuildUnifiedSheet();
+      sortAllSheetsBySupplyDate();
+      wbPutNamedFilters_(['Поставки_список', 'Детали_поставок', 'Товары_поставок', 'Поставки']);
+    }
     return;
   }
   Logger.log('✅ Поставки: новых ' + newSupplies.length + ', обновляем активных ' + Object.keys(activeIds).length);
@@ -4466,10 +4531,12 @@ function appendSuppliesToListSheetNoDuplicates(newSupplies) {
   if (!sheet) { saveSuppliesListToSheet(newSupplies); return; }
   
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var idCol = typeof wbColIdx_ === 'function' ? wbColIdx_(headers, ['supplyID']) : headers.indexOf('supplyID');
+  if (idCol < 0) idCol = 0;
   var existingIds = {};
   var lastRow = sheet.getLastRow();
   if (lastRow > 1) {
-    var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var ids = sheet.getRange(2, idCol + 1, lastRow - 1, 1).getValues();
     for (var i=0; i<ids.length; i++) if (ids[i][0]) existingIds[ids[i][0].toString()] = true;
   }
   
@@ -4480,17 +4547,14 @@ function appendSuppliesToListSheetNoDuplicates(newSupplies) {
   var rows = unique.map(function(s){
     return headers.map(function(h){
       var val = typeof wbCell_ === 'function' ? wbCell_(s, h) : s[h];
-      if ((typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(h) : dateCols.indexOf(h) !== -1) && val) return parseToJSDate(val);
+      if ((typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(h) : dateCols.indexOf(h) !== -1) && val) return sheetDateCell_(val);
       if (val === null || val === undefined) return '';
       return typeof val === 'object' && !(val instanceof Date) ? JSON.stringify(val) : val;
     });
   });
   
   sheet.getRange(lastRow + 1, 1, rows.length, headers.length).setValues(rows);
-  dateCols.forEach(function(col){
-    var idx = (typeof wbColIdx_ === 'function' ? wbColIdx_(headers, [col]) : headers.indexOf(col)) + 1;
-    if (idx > 0) sheet.getRange(lastRow + 1, idx, rows.length, 1).setNumberFormat('dd.mm.yyyy hh:mm:ss');
-  });
+  if (sheet.getLastRow() > 1) formatSheetDateCols_(sheet, headers, 2, sheet.getLastRow() - 1);
 }
 
 function appendDetailsToSheetNoDuplicates(newDetails, replaceSupplyIds) {
@@ -4526,26 +4590,26 @@ function appendDetailsToSheetNoDuplicates(newDetails, replaceSupplyIds) {
   var rows = unique.map(function(d){
     return headers.map(function(h){
       var val = typeof wbCell_ === 'function' ? wbCell_(d, h) : d[h];
-      if ((typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(h) : h.indexOf('Date') !== -1) && val) return parseToJSDate(val);
+      if ((typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(h) : h.indexOf('Date') !== -1) && val) return sheetDateCell_(val);
       if (val === null || val === undefined) return '';
-      return typeof val === 'object' ? JSON.stringify(val) : val;
+      return typeof val === 'object' && !(val instanceof Date) ? JSON.stringify(val) : val;
     });
   });
   
   if (replaceSupplyIds && replaceSupplyIds.length) {
+    for (var er = 0; er < existingRows.length; er++) {
+      for (var ej = 0; ej < headers.length; ej++) {
+        var dateCol = typeof wbIsApiDateField_ === 'function' ? wbIsApiDateField_(headers[ej]) : String(headers[ej]).indexOf('Date') !== -1;
+        if (dateCol && existingRows[er][ej]) existingRows[er][ej] = sheetDateCell_(existingRows[er][ej]);
+      }
+    }
     var finalRows = existingRows.concat(rows);
     if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, headers.length).clearContent();
     if (finalRows.length) sheet.getRange(2, 1, finalRows.length, headers.length).setValues(finalRows);
   } else if (rows.length) {
     sheet.getRange(lastRow + 1, 1, rows.length, headers.length).setValues(rows);
   }
-  for (var j=0; j<headers.length; j++) {
-    if (headers[j].indexOf('Date') !== -1) {
-      var formatFrom = replaceSupplyIds && replaceSupplyIds.length ? 2 : lastRow + 1;
-      var formatRows = replaceSupplyIds && replaceSupplyIds.length ? existingRows.length + rows.length : rows.length;
-      if (formatRows) sheet.getRange(formatFrom, j + 1, formatRows, 1).setNumberFormat('dd.mm.yyyy hh:mm:ss');
-    }
-  }
+  if (sheet.getLastRow() > 1) formatSheetDateCols_(sheet, headers, 2, sheet.getLastRow() - 1);
 }
 
 // Вспомогательная функция для получения существующих деталей
@@ -4700,10 +4764,9 @@ function rebuildUnifiedSheet() {
     var region = getRegionFromMap(whName, regionMap);
     var goods = goodsMap[sid] || [];
     
-    // 🔥 Читаем даты как объекты Date
-    var createDate = parseToJSDate(getValueByHeader(row, sHdr, 'createDate'));
-    var supplyDate = parseToJSDate(getValueByHeader(row, sHdr, 'supplyDate'));
-    var factDate = parseToJSDate(getValueByHeader(row, sHdr, 'factDate'));
+    var createDate = sheetDateCell_(getValueByHeader(row, sHdr, 'createDate')) || sheetDateCell_(det ? getValueByHeader(det, detHdr, 'createDate') : '');
+    var supplyDate = sheetDateCell_(getValueByHeader(row, sHdr, 'supplyDate')) || sheetDateCell_(det ? getValueByHeader(det, detHdr, 'supplyDate') : '');
+    var factDate = sheetDateCell_(getValueByHeader(row, sHdr, 'factDate')) || sheetDateCell_(det ? getValueByHeader(det, detHdr, 'factDate') : '');
     
     var base = [sid, getValueByHeader(row, sHdr, 'preorderID'), createDate, supplyDate, factDate,
                 getStatusName(getValueByHeader(row, sHdr, 'statusID')), getBoxTypeName(getValueByHeader(row, sHdr, 'boxTypeID')),
@@ -4714,7 +4777,8 @@ function rebuildUnifiedSheet() {
         var g = goods[j];
         var art = getValueByHeader(g, goodsHdr, 'vendorCode');
         if (art && typeof art === 'string') art = art.trim();
-        var w = weightsMap[art] || 0;
+        var artKey = art == null ? '' : String(art).trim();
+        var w = weightsMap[artKey] || 0;
         var qty = getValueByHeader(g, goodsHdr, 'quantity') || 0;
         allRows.push(base.concat([getValueByHeader(g, goodsHdr, 'barcode'), art, getValueByHeader(g, goodsHdr, 'nmID'),
                                   getValueByHeader(g, goodsHdr, 'techSize'), getValueByHeader(g, goodsHdr, 'color'),
@@ -4727,10 +4791,7 @@ function rebuildUnifiedSheet() {
   
   if (allRows.length > 0) {
     uniSh.getRange(2,1,allRows.length,uniHdr.length).setValues(allRows);
-    ['Дата создания','Дата поставки','Факт дата'].forEach(function(c){
-      var idx = uniHdr.indexOf(c) + 1;
-      if (idx > 0) uniSh.getRange(2, idx, allRows.length, 1).setNumberFormat('dd.mm.yyyy hh:mm:ss');
-    });
+    formatSheetDateCols_(uniSh, uniHdr, 2, allRows.length);
     ['Вес, кг за 1 шт','Общий вес, кг'].forEach(function(c){
       var idx = uniHdr.indexOf(c) + 1;
       if (idx > 0) uniSh.getRange(2, idx, allRows.length, 1).setNumberFormat('0.000');
@@ -6712,6 +6773,7 @@ function updateExistingSuppliesStatuses() {
   var deletedCount = 0;
   var rowsToDelete = [];
   var statusUpdates = []; // {row, value} — пишем пачкой в конце чанка
+  var datePatches = [];
   var toCheck = [];
   var skippedAccepted = 0;
 
@@ -6780,6 +6842,13 @@ function updateExistingSuppliesStatuses() {
       
       if (statusCode === 200) {
         var details = JSON.parse(response.getContentText());
+        datePatches.push({
+          row: item.row,
+          createDate: details.createDate,
+          supplyDate: details.supplyDate,
+          factDate: details.factDate,
+          updatedDate: details.updatedDate
+        });
         var newStatus = details.statusID;
         if (newStatus !== undefined && newStatus != item.curStatus) {
           statusUpdates.push({ row: item.row, value: newStatus });
@@ -6814,6 +6883,7 @@ function updateExistingSuppliesStatuses() {
     if ((j + 1) % 25 === 0) Logger.log('📊 Прогресс статусов: ' + (j + 1) + '/' + toCheck.length);
   }
 
+  flushSupplyDatePatches_(listSheet, headers, datePatches);
   // Пачечная запись статусов
   for (var u = 0; u < statusUpdates.length; u++) {
     listSheet.getRange(statusUpdates[u].row, statusColNum).setValue(statusUpdates[u].value);
