@@ -474,11 +474,317 @@ function funnelOrdersReportFill_(ss, dateFrom, dateTo, valueHeader, result, date
   return true;
 }
 
+var ORDERS_KG_PRICE_KEY_ = 'WB_ORDERS_KG_PRICE';
+
+function ordersKgNum_(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  var n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.'));
+  return isNaN(n) ? 0 : n;
+}
+
+function ordersKgParamsFrom_(payload) {
+  payload = payload || {};
+  return {
+    commission: ordersKgNum_(payload.commission),
+    promo: ordersKgNum_(payload.promo),
+    returnRub: ordersKgNum_(payload.returnRub),
+    storage: ordersKgNum_(payload.storage),
+    acceptance: ordersKgNum_(payload.acceptance),
+    logistics: ordersKgNum_(payload.logistics)
+  };
+}
+
+function getOrdersKgPriceParams() {
+  try {
+    var raw = PropertiesService.getDocumentProperties().getProperty(ORDERS_KG_PRICE_KEY_);
+    if (!raw) return {};
+    return JSON.parse(raw) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveOrdersKgPriceParams_(params) {
+  PropertiesService.getDocumentProperties().setProperty(ORDERS_KG_PRICE_KEY_, JSON.stringify(params));
+}
+
+function ordersPricePerKg_(price, kg, weight) {
+  var w = parseFloat(weight);
+  if (!(w > 0)) return '';
+  var p = parseFloat(price);
+  if (isNaN(p)) p = 0;
+  var net = ((100 - kg.commission - kg.promo) / 100) * p
+    - kg.returnRub - kg.storage - kg.acceptance - kg.logistics;
+  return net / w;
+}
+
+function ordersKgFormulaNum_(n) {
+  var x = Math.round((parseFloat(n) || 0) * 1000000) / 1000000;
+  return String(x).replace('.', ',');
+}
+
+/** Диапазон ВПР: первый столбец — артикул, вес правее («Вес, кг за 1 шт»). */
+function ordersKgVlookupSpec_(ss) {
+  var sheet = ss.getSheetByName('Товар+Вес');
+  if (!sheet || sheet.getLastColumn() < 1) return null;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var artIdx = -1;
+  var wIdx = -1;
+  var artFallback = -1;
+  var i, h;
+  for (i = 0; i < headers.length; i++) {
+    h = String(headers[i] || '').toLowerCase().trim();
+    if (h === 'артикул') artIdx = i;
+    if (artFallback < 0 && h.indexOf('артикул') !== -1) artFallback = i;
+    if (h === 'вес, кг за 1 шт') wIdx = i;
+  }
+  if (artIdx < 0) artIdx = artFallback;
+  if (artIdx < 0 || wIdx < 0) return null;
+  if (wIdx < artIdx) return { error: 'left' };
+  return {
+    range: "'Товар+Вес'!$" + columnToLetter(artIdx + 1) + ':$' + columnToLetter(wIdx + 1),
+    index: wIdx - artIdx + 1
+  };
+}
+
+function ordersHandKgFormula_(lookup, kg, artA1, priceA1) {
+  var net = '((100-' + ordersKgFormulaNum_(kg.commission) + '-' + ordersKgFormulaNum_(kg.promo) + ')/100*' + priceA1 +
+    '-' + ordersKgFormulaNum_(kg.returnRub) + '-' + ordersKgFormulaNum_(kg.storage) +
+    '-' + ordersKgFormulaNum_(kg.acceptance) + '-' + ordersKgFormulaNum_(kg.logistics) + ')';
+  var v = 'VLOOKUP(TRIM(' + artA1 + ');' + lookup.range + ';' + lookup.index + ';FALSE)';
+  return '=IF(' + priceA1 + '="";"";IFERROR(LET(w;' + v + ';IF(N(w)>0;' + net + '/N(w);""));""))';
+}
+
+function ordersHandKgTotalFormula_(qtyLetter, kgLetter, fromRow, toRow) {
+  var kgR = kgLetter + fromRow + ':' + kgLetter + toRow;
+  var qtyR = qtyLetter + fromRow + ':' + qtyLetter + toRow;
+  return '=IFERROR(SUMPRODUCT((' + kgR + '<>"")*(' + qtyR + ')*(' + kgR + '))/SUMPRODUCT((' + kgR + '<>"")*(' + qtyR + '));"")';
+}
+
+function ordersHandPriceSaved_(sheet) {
+  var map = {};
+  if (!sheet || sheet.getLastRow() < 5 || sheet.getLastColumn() < 1) return map;
+  var headers = sheet.getRange(3, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var aIdx = -1;
+  var pIdx = -1;
+  var i;
+  for (i = 0; i < headers.length; i++) {
+    var h = String(headers[i] || '').trim();
+    if (h === 'Артикул') aIdx = i;
+    if (h === 'Ручная цена') pIdx = i;
+  }
+  if (aIdx < 0) aIdx = 0;
+  if (pIdx < 0) return map;
+  var n = sheet.getLastRow() - 4;
+  var arts = sheet.getRange(5, aIdx + 1, n, 1).getValues();
+  var prices = sheet.getRange(5, pIdx + 1, n, 1).getValues();
+  for (i = 0; i < arts.length; i++) {
+    var art = String(arts[i][0] || '').trim().toLowerCase();
+    if (!art || art === 'итого') continue;
+    var p = prices[i][0];
+    if (p === '' || p === null) continue;
+    map[art] = p;
+  }
+  return map;
+}
+
+function ordersKgWeightMap_(ss) {
+  var map = {};
+  var sheet = ss.getSheetByName('Товар+Вес');
+  if (!sheet) return map;
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return map;
+  var headers = data[0];
+  var artIdx = -1;
+  var wIdx = -1;
+  var i;
+  for (i = 0; i < headers.length; i++) {
+    var h = String(headers[i] || '').toLowerCase().trim();
+    if (artIdx < 0 && h.indexOf('артикул') !== -1) artIdx = i;
+    if (h === 'вес, кг за 1 шт') wIdx = i;
+  }
+  if (artIdx < 0) artIdx = 0;
+  if (wIdx < 0) return map;
+  for (i = 1; i < data.length; i++) {
+    var art = data[i][artIdx];
+    if (!art) continue;
+    var w = parseFloat(String(data[i][wIdx]).replace(/\s/g, '').replace(',', '.'));
+    if (w > 0) map[String(art).trim().toLowerCase()] = w;
+  }
+  return map;
+}
+
+function lkReportDateKey_(val) {
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.getFullYear() + '-' + ('0' + (val.getMonth() + 1)).slice(-2) + '-' + ('0' + val.getDate()).slice(-2);
+  }
+  var s = String(val == null ? '' : val).trim();
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+  var dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (dmy) return dmy[3] + '-' + ('0' + dmy[2]).slice(-2) + '-' + ('0' + dmy[1]).slice(-2);
+  return '';
+}
+
+function lkReportDateLabel_(key) {
+  var m = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? m[3] + '.' + m[2] + '.' + m[1] : String(key || '');
+}
+
+/** Последняя дата «Остатки ЛК», сумма «Остаток» по артикулу. Склады с заполненным «Пострадавший» не входят. */
+function lkReportStocksByArt_(ss) {
+  var sheet = ss.getSheetByName('Остатки ЛК');
+  if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() < 1) {
+    SpreadsheetApp.getUi().alert('Лист «Остатки ЛК» пуст или не найден.');
+    return null;
+  }
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var dIdx = -1, aIdx = -1, qIdx = -1, vIdx = -1, i, h;
+  for (i = 0; i < headers.length; i++) {
+    h = String(headers[i] || '').trim();
+    if (h === 'Дата') dIdx = i;
+    else if (h === 'Артикул продавца') aIdx = i;
+    else if (h === 'Остаток') qIdx = i;
+    else if (h === 'Пострадавший') vIdx = i;
+  }
+  if (dIdx < 0 || aIdx < 0 || qIdx < 0) {
+    SpreadsheetApp.getUi().alert('На «Остатки ЛК» нет столбцов Дата / Артикул продавца / Остаток.');
+    return null;
+  }
+  if (vIdx < 0) {
+    SpreadsheetApp.getUi().alert('На «Остатки ЛК» нет столбца «Пострадавший».');
+    return null;
+  }
+  var latest = '';
+  var key;
+  for (i = 1; i < data.length; i++) {
+    key = lkReportDateKey_(data[i][dIdx]);
+    if (key > latest) latest = key;
+  }
+  var byArt = {};
+  var rows = 0;
+  var skipped = 0;
+  if (!latest) return { byArt: byArt, date: '', rows: 0, skipped: 0 };
+  for (i = 1; i < data.length; i++) {
+    if (lkReportDateKey_(data[i][dIdx]) !== latest) continue;
+    if (String(data[i][vIdx] == null ? '' : data[i][vIdx]).trim() !== '') {
+      skipped++;
+      continue;
+    }
+    var art = String(data[i][aIdx] || '').trim().toLowerCase();
+    if (!art) continue;
+    var qty = parseFloat(String(data[i][qIdx]).replace(/\s/g, '').replace(',', '.'));
+    if (isNaN(qty)) qty = 0;
+    byArt[art] = (byArt[art] || 0) + qty;
+    rows++;
+  }
+  return { byArt: byArt, date: latest, rows: rows, skipped: skipped };
+}
+
+function lkReportApplyStocks_(result, byArt) {
+  var key, art;
+  for (key in result) {
+    if (!Object.prototype.hasOwnProperty.call(result, key)) continue;
+    art = String(key.split('|')[0] || '').trim().toLowerCase();
+    result[key].stocks = byArt[art] || 0;
+  }
+}
+
+function lkReportDoneTitle_(title, pack) {
+  return title + '\nОстатки ЛК на ' + lkReportDateLabel_(pack.date) +
+    '\nСтрок без «Пострадавший»: ' + pack.rows +
+    '\nПропущено пострадавших строк: ' + pack.skipped;
+}
+
+function lkReportUseStocks_(ss, opt, title) {
+  opt = opt || {};
+  if (opt.stocksByArt) return opt;
+  var pack = lkReportStocksByArt_(ss);
+  if (!pack) return null;
+  opt.stocksByArt = pack.byArt;
+  if (!opt.doneTitle) opt.doneTitle = lkReportDoneTitle_(title, pack);
+  return opt;
+}
+
 function сформироватьОтчет_Заказы_Количество() {
+  ordersQtyKgDialog_({
+    title: 'К-во заказов — цена за 1 кг',
+    info: 'Лист «К-во заказов». Вес берётся из «Товар+Вес» по артикулу. В конце: «Ручная цена» (пустая, заполняете сами; при обновлении значение сохраняется по артикулу) и «Ручная цена за 1кг» — живая формула, вес через ВПР. Комиссия и продвижение — в процентах, остальные поля — в рублях.',
+    runner: 'runOrdersQtyKgReport',
+    height: 620
+  });
+}
+
+function ordersQtyKgDialog_(opt) {
+  var info = opt.info || '';
+  var runner = opt.runner || 'runOrdersQtyKgReport';
+  var html = '<!DOCTYPE html><html><head><style>' +
+    'body{font-family:Arial;padding:16px;margin:0}' +
+    'h3{margin:0 0 8px}' +
+    'label{display:block;margin:8px 0 4px;font-weight:bold;font-size:13px}' +
+    'input{width:100%;padding:6px;box-sizing:border-box;border:1px solid #ccc;border-radius:4px}' +
+    'button{background:#4CAF50;color:white;padding:10px 16px;border:none;border-radius:4px;cursor:pointer;width:100%;font-size:14px;margin-top:14px}' +
+    'button:disabled{background:#9e9e9e;cursor:default}' +
+    '.info{background:#e3f2fd;padding:8px;margin:0 0 8px;border-radius:4px;font-size:12px}' +
+    '</style></head><body>' +
+    '<h3>Цена за 1 кг</h3>' +
+    '<div class="info">' + info + '</div>' +
+    '<label>Комиссия сервиса, %</label><input id="commission" inputmode="decimal">' +
+    '<label>Продвижение, %</label><input id="promo" inputmode="decimal">' +
+    '<label>Возврат, ₽</label><input id="returnRub" inputmode="decimal">' +
+    '<label>Хранение, ₽</label><input id="storage" inputmode="decimal">' +
+    '<label>Приемка, ₽</label><input id="acceptance" inputmode="decimal">' +
+    '<label>Логистика до выдачи, ₽</label><input id="logistics" inputmode="decimal">' +
+    '<button id="go" onclick="loadReport()">Загрузить</button>' +
+    '<script>' +
+    'var ids=["commission","promo","returnRub","storage","acceptance","logistics"];' +
+    'var runner=' + JSON.stringify(runner) + ';' +
+    'google.script.run.withSuccessHandler(function(p){' +
+    'p=p||{};' +
+    'ids.forEach(function(id){ if(p[id]!==undefined && p[id]!==null && p[id]!=="") document.getElementById(id).value=p[id]; });' +
+    '}).getOrdersKgPriceParams();' +
+    'function loadReport(){' +
+    'var btn=document.getElementById("go"); btn.disabled=true; btn.textContent="Формирую...";' +
+    'var payload={};' +
+    'ids.forEach(function(id){ payload[id]=document.getElementById(id).value; });' +
+    'google.script.run.withFailureHandler(function(e){ btn.disabled=false; btn.textContent="Загрузить"; alert(e && e.message ? e.message : e); })' +
+    '.withSuccessHandler(function(){ google.script.host.close(); })' +
+    '[runner](payload);' +
+    '}' +
+    '</script></body></html>';
+  var dialog = HtmlService.createHtmlOutput(html).setWidth(420).setHeight(opt.height || 560);
+  SpreadsheetApp.getUi().showModalDialog(dialog, opt.title || 'К-во заказов — цена за 1 кг');
+}
+
+function runOrdersQtyKgReport(payload) {
+  var params = ordersKgParamsFrom_(payload);
+  saveOrdersKgPriceParams_(params);
+  ordersQtyReportBuild_({
+    sheetName: 'К-во заказов',
+    kg: params,
+    handPrice: true
+  });
+}
+
+function ordersQtyReportBuild_(opt) {
+  opt = opt || {};
+  var doneBase = opt.doneTitle || "✅ Отчёт 'Количество заказов' обновлён";
+  delete opt.doneTitle;
+  opt = lkReportUseStocks_(SpreadsheetApp.getActiveSpreadsheet(), opt, doneBase);
+  if (!opt) return;
+  const kg = opt.kg ? opt.kg : null;
+  const handPrice = !!(opt.handPrice && kg);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const startSheet = ss.getSheetByName("К-во заказов");
+  var sheetName = opt.sheetName ? opt.sheetName : "К-во заказов";
+  var periodName = opt.periodSheet ? opt.periodSheet : sheetName;
+  var handSaved = handPrice ? ordersHandPriceSaved_(ss.getSheetByName(sheetName)) : null;
+  var startSheet = ss.getSheetByName(periodName);
+  if (!startSheet) {
+    SpreadsheetApp.getUi().alert('❌ Лист «' + periodName + '» не найден');
+    return;
+  }
   const financeSheet = ss.getSheetByName("Финансовые_ежедневные");
-  const stocksSheet = ss.getSheetByName("Остатки");
   const goodsSheet = ss.getSheetByName("Товары");
   const manualPriceSheet = ss.getSheetByName("Товар+Вес"); // 🔥 ДОБАВЛЕНО
 
@@ -489,8 +795,11 @@ function сформироватьОтчет_Заказы_Количество() 
   const fromTime = dateFrom.getTime();
   const toTime = dateTo.getTime();
 
-  const sheetName = "К-во заказов";
-  
+  if (kg && (isNaN(fromTime) || isNaN(toTime))) {
+    SpreadsheetApp.getUi().alert('❌ Укажите период в ячейках A1 (с) и A2 (по) на листе «' + sheetName + '».');
+    return;
+  }
+
   const result = {};
   const datesObj = {};
 
@@ -658,65 +967,8 @@ function сформироватьОтчет_Заказы_Количество() 
     }
   }
 
-  // ============ 5. ЗАГРУЗКА ОСТАТКОВ ============
-  if (stocksSheet) {
-    const stocksValues = stocksSheet.getDataRange().getValues();
-    const stocksHeaders = stocksValues[0];
-    
-    let artIndex = -1;
-    let stockQtyIndex = -1;
-    let dateIndex = -1;
-    
-    for (let i = 0; i < stocksHeaders.length; i++) {
-      const header = stocksHeaders[i];
-      if (header === 'Артикул продавца') artIndex = i;
-      if (header === 'Остаток') stockQtyIndex = i;
-      if (header === 'Дата') dateIndex = i;
-    }
-    
-    if (artIndex !== -1 && stockQtyIndex !== -1 && dateIndex !== -1) {
-      const stocksByArt = {};
-      
-      for (let i = 1; i < stocksValues.length; i++) {
-        const art = stocksValues[i][artIndex];
-        if (!art) continue;
-        
-        const qty = parseFloat(stocksValues[i][stockQtyIndex]) || 0;
-        const dateValue = stocksValues[i][dateIndex];
-        const dateTime = dateValue ? new Date(dateValue).getTime() : 0;
-        
-        const artKey = String(art).toLowerCase();
-        
-        if (!stocksByArt[artKey]) {
-          stocksByArt[artKey] = {
-            maxDate: -1,
-            dateSums: {}
-          };
-        }
-        
-        const dateKey = dateTime;
-        if (!stocksByArt[artKey].dateSums[dateKey]) {
-          stocksByArt[artKey].dateSums[dateKey] = 0;
-        }
-        stocksByArt[artKey].dateSums[dateKey] += qty;
-        
-        if (dateTime > stocksByArt[artKey].maxDate) {
-          stocksByArt[artKey].maxDate = dateTime;
-        }
-      }
-      
-      for (const key in result) {
-        const art = key.split('|')[0];
-        const artLower = art.toLowerCase();
-        
-        if (stocksByArt[artLower] && stocksByArt[artLower].maxDate !== -1) {
-          const maxDate = stocksByArt[artLower].maxDate;
-          const sumOnMaxDate = stocksByArt[artLower].dateSums[maxDate] || 0;
-          result[key].stocks = sumOnMaxDate;
-        }
-      }
-    }
-  }
+  // ============ 5. ОСТАТКИ С «Остатки ЛК»: последняя дата, без пострадавших складов ============
+  lkReportApplyStocks_(result, opt.stocksByArt);
 
   // ============ 6. ФОРМИРОВАНИЕ ОТЧЕТА ============
   const currentYear = new Date().getFullYear();
@@ -730,8 +982,17 @@ function сформироватьОтчет_Заказы_Количество() 
 
   const output = [];
   
-  // 🔥 ДОБАВЛЕН СТОЛБЕЦ "Цена" в конец
-  const headers = ["Артикул", "Наименование", ...dateList, "Итого", "Возвраты", "Остатки", "Ср. цена", "Текущ цена", "Цена"];
+  const tail = ["Итого", "Возвраты", "Остатки", "Ср. цена"];
+  if (kg) tail.push("Ср. цена за 1кг");
+  tail.push("Текущ цена");
+  if (kg) tail.push("Текущ цена за 1кг");
+  tail.push("Цена");
+  if (kg) tail.push("Цена за 1кг");
+  if (handPrice) {
+    tail.push("Ручная цена");
+    tail.push("Ручная цена за 1кг");
+  }
+  const headers = ["Артикул", "Наименование", ...dateList, ...tail];
   output.push(headers);
 
   const colTotals = new Array(dateList.length).fill(0);
@@ -740,6 +1001,9 @@ function сформироватьОтчет_Заказы_Количество() 
   let grandStocks = 0;
   
   let twAvg = 0, twCur = 0, twMan = 0, totalQty = 0;
+  let twAvgKg = 0, twCurKg = 0, twManKg = 0;
+  let qtyAvgKg = 0, qtyCurKg = 0, qtyManKg = 0;
+  const weightMap = kg ? ordersKgWeightMap_(ss) : null;
   
   const keys = Object.keys(result).sort((a, b) => a.split("|")[0].localeCompare(b.split("|")[0], 'ru'));
 
@@ -758,14 +1022,32 @@ function сформироватьОтчет_Заказы_Количество() 
       colTotals[j] += v;
       grand += v;
     }
+
+    var avgKg = '';
+    var curKg = '';
+    var manKg = '';
+    if (kg) {
+      var wKg = weightMap[String(parts[0]).trim().toLowerCase()] || 0;
+      avgKg = ordersPricePerKg_(item.avgPrice, kg, wKg);
+      if (typeof avgKg === 'number' && avgKg < 0) avgKg = '';
+      curKg = ordersPricePerKg_(item.currentPrice, kg, wKg);
+      manKg = ordersPricePerKg_(item.manualPrice, kg, wKg);
+    }
     
-    // 🔥 ДОБАВЛЕНА manualPrice
     row.push(sumRow);
     row.push(item.returns);
     row.push(item.stocks);
     row.push(item.avgPrice);
+    if (kg) row.push(avgKg);
     row.push(item.currentPrice);
+    if (kg) row.push(curKg);
     row.push(item.manualPrice);
+    if (kg) row.push(manKg);
+    if (handPrice) {
+      var savedHand = handSaved[String(parts[0]).trim().toLowerCase()];
+      row.push(savedHand !== undefined ? savedHand : '');
+      row.push('');
+    }
     
     dataRows.push(row);
     
@@ -778,6 +1060,11 @@ function сформироватьОтчет_Заказы_Количество() 
       twCur += (item.currentPrice || 0) * sumRow;
       twMan += (item.manualPrice || 0) * sumRow;
       totalQty += sumRow;
+      if (kg) {
+        if (avgKg !== '') { twAvgKg += avgKg * sumRow; qtyAvgKg += sumRow; }
+        if (curKg !== '') { twCurKg += curKg * sumRow; qtyCurKg += sumRow; }
+        if (manKg !== '') { twManKg += manKg * sumRow; qtyManKg += sumRow; }
+      }
     }
   }
 
@@ -786,7 +1073,21 @@ function сформироватьОтчет_Заказы_Количество() 
   const curT = totalQty > 0 ? twCur / totalQty : 0;
   const manT = totalQty > 0 ? twMan / totalQty : 0;
   
-  const totalRow = ["Итого", "", ...colTotals, grand, grandReturns, grandStocks, avgT, curT, manT];
+  var avgKgTotal = '';
+  if (kg && qtyAvgKg > 0) {
+    avgKgTotal = twAvgKg / qtyAvgKg;
+    if (avgKgTotal < 0) avgKgTotal = '';
+  }
+  const totalRow = ["Итого", "", ...colTotals, grand, grandReturns, grandStocks, avgT];
+  if (kg) totalRow.push(avgKgTotal);
+  totalRow.push(curT);
+  if (kg) totalRow.push(qtyCurKg > 0 ? twCurKg / qtyCurKg : '');
+  totalRow.push(manT);
+  if (kg) totalRow.push(qtyManKg > 0 ? twManKg / qtyManKg : '');
+  if (handPrice) {
+    totalRow.push('');
+    totalRow.push('');
+  }
   output.push(totalRow);
   
   for (const row of dataRows) {
@@ -848,11 +1149,24 @@ function сформироватьОтчет_Заказы_Количество() 
   sheet.setColumnWidth(dateList.length + 3, 30);
   sheet.setColumnWidth(dateList.length + 4, 55);
   sheet.setColumnWidth(dateList.length + 5, 55);
-  sheet.setColumnWidth(dateList.length + 6, 55);
-  sheet.setColumnWidth(dateList.length + 7, 55);
-  sheet.setColumnWidth(dateList.length + 8, 55); // 🔥 ДЛЯ "Цена"
-  
-  sheet.setRowHeight(3, 55);
+  if (kg) {
+    sheet.setColumnWidth(dateList.length + 6, 55);
+    sheet.setColumnWidth(dateList.length + 7, 78);
+    sheet.setColumnWidth(dateList.length + 8, 55);
+    sheet.setColumnWidth(dateList.length + 9, 84);
+    sheet.setColumnWidth(dateList.length + 10, 55);
+    sheet.setColumnWidth(dateList.length + 11, 72);
+    if (handPrice) {
+      sheet.setColumnWidth(dateList.length + 12, 72);
+      sheet.setColumnWidth(dateList.length + 13, 96);
+    }
+    sheet.setRowHeight(3, 64);
+  } else {
+    sheet.setColumnWidth(dateList.length + 6, 55);
+    sheet.setColumnWidth(dateList.length + 7, 55);
+    sheet.setColumnWidth(dateList.length + 8, 55); // 🔥 ДЛЯ "Цена"
+    sheet.setRowHeight(3, 55);
+  }
 
   // ============ 10. ФОРМАТЫ ЧИСЕЛ ============
   const startR = 4;
@@ -872,28 +1186,83 @@ function сформироватьОтчет_Заказы_Количество() 
     sheet.getRange(totalRowNum, dateList.length + 3, 1, 1)
       .setNumberFormat("0");
     
-    // Цены — всегда 0.00, без округления до целых
-    sheet.getRange(totalRowNum, colAvg, 1, 1).setNumberFormat("#,##0.00");
-    sheet.getRange(totalRowNum, colCur, 1, 1).setNumberFormat("#,##0.00");
-    sheet.getRange(totalRowNum, colMan, 1, 1).setNumberFormat("#,##0.00");
-    
-    // Данные (строки 5 и ниже) - для цен с копейками
-    if (cntR > 1) {
-      const dataStartRow = 5;
-      const dataRowsCount = cntR - 1;
+    if (kg) {
+      var kgPriceCols = [
+        dateList.length + 6,
+        dateList.length + 7,
+        dateList.length + 8,
+        dateList.length + 9,
+        dateList.length + 10,
+        dateList.length + 11
+      ];
+      if (handPrice) {
+        kgPriceCols.push(dateList.length + 12);
+        kgPriceCols.push(dateList.length + 13);
+      }
+      for (var pi = 0; pi < kgPriceCols.length; pi++) {
+        sheet.getRange(totalRowNum, kgPriceCols[pi], output.length - 1, 1).setNumberFormat("#,##0.00");
+      }
+    } else {
+      // Цены — всегда 0.00, без округления до целых
+      sheet.getRange(totalRowNum, colAvg, 1, 1).setNumberFormat("#,##0.00");
+      sheet.getRange(totalRowNum, colCur, 1, 1).setNumberFormat("#,##0.00");
+      sheet.getRange(totalRowNum, colMan, 1, 1).setNumberFormat("#,##0.00");
       
-      sheet.getRange(dataStartRow, colAvg, dataRowsCount, 1)
-        .setNumberFormat("#,##0.00");
-      sheet.getRange(dataStartRow, colCur, dataRowsCount, 1)
-        .setNumberFormat("#,##0.00");
-      sheet.getRange(dataStartRow, colMan, dataRowsCount, 1)
-        .setNumberFormat("#,##0.00"); // 🔥 Цена с копейками для данных
+      // Данные (строки 5 и ниже) - для цен с копейками
+      if (cntR > 1) {
+        const dataStartRow = 5;
+        const dataRowsCount = cntR - 1;
+        
+        sheet.getRange(dataStartRow, colAvg, dataRowsCount, 1)
+          .setNumberFormat("#,##0.00");
+        sheet.getRange(dataStartRow, colCur, dataRowsCount, 1)
+          .setNumberFormat("#,##0.00");
+        sheet.getRange(dataStartRow, colMan, dataRowsCount, 1)
+          .setNumberFormat("#,##0.00"); // 🔥 Цена с копейками для данных
+      }
     }
   }
 
-  formatCurrentSheet();
+  if (handPrice && dataRows.length > 0) {
+    ordersHandPriceWriteFormulas_(ss, sheet, kg, dateList.length, dataRows.length);
+  }
 
-  SpreadsheetApp.getUi().alert("✅ Отчёт 'Количество заказов' обновлён");
+  if (kg) {
+    formatCurrentSheet(sheet);
+    try { sheet.activate(); } catch (eAct) {}
+    SpreadsheetApp.getUi().alert((opt && opt.doneTitle) || "✅ Отчёт 'Количество заказов' обновлён");
+  } else {
+    formatCurrentSheet();
+    SpreadsheetApp.getUi().alert((opt && opt.doneTitle) || "✅ Отчёт 'Количество заказов' обновлён");
+  }
+}
+
+function ordersHandPriceWriteFormulas_(ss, sheet, kg, dateCount, dataCount) {
+  if (!sheet) return;
+  var lookup = ordersKgVlookupSpec_(ss);
+  var headers = sheet.getRange(3, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var handPriceCol = headers.indexOf('Ручная цена') + 1;
+  var handKgCol = headers.indexOf('Ручная цена за 1кг') + 1;
+  if (handPriceCol < 1 || handKgCol < 1) return;
+  if (!lookup || lookup.error) {
+    var why = lookup && lookup.error === 'left'
+      ? 'Столбец «Вес, кг за 1 шт» стоит левее «Артикул», ВПР так не считает.'
+      : 'На «Товар+Вес» нет столбцов «Артикул» и «Вес, кг за 1 шт».';
+    SpreadsheetApp.getUi().alert(why + ' Формула «Ручная цена за 1кг» не поставлена.');
+    return;
+  }
+  var priceLetter = columnToLetter(handPriceCol);
+  var kgLetter = columnToLetter(handKgCol);
+  var qtyLetter = columnToLetter(dateCount + 3);
+  var lastDataRow = 4 + dataCount;
+  var formulas = [[ordersHandKgTotalFormula_(qtyLetter, kgLetter, 5, lastDataRow)]];
+  var fr;
+  for (fr = 5; fr <= lastDataRow; fr++) {
+    formulas.push([ordersHandKgFormula_(lookup, kg, '$A' + fr, priceLetter + fr)]);
+  }
+  sheet.getRange(4, handKgCol, formulas.length, 1).setFormulas(formulas);
+  sheet.getRange(3, handPriceCol).setNote('Пустая при выгрузке. Впишите цену — при следующем обновлении она сохранится по артикулу.');
+  sheet.getRange(3, handKgCol).setNote('Живая формула от «Ручная цена». Вес — ВПР с листа «Товар+Вес», столбец «Вес, кг за 1 шт». Вычеты те же, что у «Цена за 1кг».');
 }
 
 function сформироватьОтчет_ЗаказыFBS_Количество() {
@@ -1384,11 +1753,18 @@ function сформироватьОтчет_Заказы_Сумма() {
 }
 */
 
-function сформироватьОтчет_Заказы_Вес() {
+function сформироватьОтчет_Заказы_Вес(opt) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const startSheet = ss.getSheetByName("Вес заказов");
+  opt = lkReportUseStocks_(ss, opt, "✅ Отчёт 'Вес заказов' обновлён");
+  if (!opt) return;
+  const sheetName = opt.sheetName || "Вес заказов";
+  const periodName = opt.periodSheet || sheetName;
+  const startSheet = ss.getSheetByName(periodName);
+  if (!startSheet) {
+    SpreadsheetApp.getUi().alert('❌ Лист «' + periodName + '» не найден');
+    return;
+  }
   const financeSheet = ss.getSheetByName("Финансовые_ежедневные");
-  const stocksSheet = ss.getSheetByName("Остатки");
   const goodsSheet = ss.getSheetByName("Товары");
   const manualPriceSheet = ss.getSheetByName("Товар+Вес"); // 🔥 Новый лист
 
@@ -1399,8 +1775,6 @@ function сформироватьОтчет_Заказы_Вес() {
   const fromTime = dateFrom.getTime();
   const toTime = dateTo.getTime();
 
-  const sheetName = "Вес заказов";
-  
   const result = {};
   const datesObj = {};
 
@@ -1506,36 +1880,8 @@ function сформироватьОтчет_Заказы_Вес() {
     }
   }
 
-  // ============ 5. ОСТАТКИ ============
-  if (stocksSheet) {
-    const sValues = stocksSheet.getDataRange().getValues();
-    const sHeaders = sValues[0];
-    let aIdx = -1, qIdx = -1, dIdx = -1;
-    for (let i = 0; i < sHeaders.length; i++) {
-      if (sHeaders[i] === 'Артикул продавца') aIdx = i;
-      if (sHeaders[i] === 'Остаток') qIdx = i;
-      if (sHeaders[i] === 'Дата') dIdx = i;
-    }
-    
-    if (aIdx !== -1 && qIdx !== -1 && dIdx !== -1) {
-      const stMap = {};
-      for (let i = 1; i < sValues.length; i++) {
-        const a = sValues[i][aIdx];
-        if (!a) continue;
-        const q = parseFloat(sValues[i][qIdx]) || 0;
-        const t = sValues[i][dIdx] ? new Date(sValues[i][dIdx]).getTime() : 0;
-        const k = a.toString().toLowerCase();
-        if (!stMap[k]) stMap[k] = { maxT: -1, sums: {} };
-        if (!stMap[k].sums[t]) stMap[k].sums[t] = 0;
-        stMap[k].sums[t] += q;
-        if (t > stMap[k].maxT) stMap[k].maxT = t;
-      }
-      for (const key in result) {
-        const art = key.split('|')[0].toLowerCase();
-        if (stMap[art] && stMap[art].maxT !== -1) result[key].stocks = stMap[art].sums[stMap[art].maxT] || 0;
-      }
-    }
-  }
+  // ============ 5. ОСТАТКИ С «Остатки ЛК»: последняя дата, без пострадавших складов ============
+  lkReportApplyStocks_(result, opt.stocksByArt);
 
   // ============ 6. ФОРМИРОВАНИЕ ОТЧЕТА ============
   const curYear = new Date().getFullYear();
@@ -1642,8 +1988,8 @@ function сформироватьОтчет_Заказы_Вес() {
     sheet.getRange(startR, colMan, cntR, 1).setNumberFormat("#,##0.00");
   }
 
-  if (typeof formatCurrentSheet === 'function') formatCurrentSheet();
-  SpreadsheetApp.getUi().alert("✅ Отчёт 'Вес заказов' обновлён");
+  if (typeof formatCurrentSheet === 'function') formatCurrentSheet(opt.sheetName ? sheet : undefined);
+  SpreadsheetApp.getUi().alert(opt.doneTitle || "✅ Отчёт 'Вес заказов' обновлён");
 }
 
 function сформироватьОтчетРекламаИПродажи2() {
@@ -2047,6 +2393,8 @@ function formatCurrentSheet(optSheet) {
   
   // ============ 5. ЗАЛИВКА СЛУЖЕБНЫХ КОЛОНОК ============
   let возвратыCol = -1, остаткиCol = -1, средняяЦенаCol = -1, текущаяЦенаCol = -1, ценаCol = -1;
+  let срКгCol = -1, текКгCol = -1, ценаКгCol = -1;
+  let ручЦенаCol = -1, ручКгCol = -1;
   let проданоCol = -1, вПутиCol = -1, отмененоCol = -1;
   
   for (let col = 1; col <= lastCol; col++) {
@@ -2054,15 +2402,20 @@ function formatCurrentSheet(optSheet) {
     if (h === 'Возвраты') возвратыCol = col;
     else if (h === 'Остатки') остаткиCol = col;
     else if (h === 'Ср. цена') средняяЦенаCol = col;
+    else if (h === 'Ср. цена за 1кг') срКгCol = col;
     else if (h === 'Текущ цена') текущаяЦенаCol = col;
+    else if (h === 'Текущ цена за 1кг') текКгCol = col;
     else if (h === 'Цена') ценаCol = col;
+    else if (h === 'Цена за 1кг') ценаКгCol = col;
+    else if (h === 'Ручная цена') ручЦенаCol = col;
+    else if (h === 'Ручная цена за 1кг') ручКгCol = col;
     else if (h === 'Продано') проданоCol = col;
     else if (h === 'В пути') вПутиCol = col;
     else if (h === 'Отменено') отмененоCol = col;
   }
   
-  const colsToFill = [возвратыCol, остаткиCol, средняяЦенаCol, текущаяЦенаCol, ценаCol];
-  const fillColors = ["#ffc000", "#ccffcc", "#fff2cc", "#a4c2f4", "#d5a6bd"];
+  const colsToFill = [возвратыCol, остаткиCol, средняяЦенаCol, срКгCol, текущаяЦенаCol, текКгCol, ценаCol, ценаКгCol, ручЦенаCol, ручКгCol];
+  const fillColors = ["#ffc000", "#ccffcc", "#fff2cc", "#ffe599", "#a4c2f4", "#9fc5e8", "#d5a6bd", "#ead1dc", "#fce5cd", "#f6b26b"];
   
   for (let i = 0; i < colsToFill.length; i++) {
     const col = colsToFill[i];
@@ -2073,7 +2426,7 @@ function formatCurrentSheet(optSheet) {
   }
 
   // Ср. цена / Текущ цена / Цена — всегда два знака, без округления до целых
-  const priceFmtCols = [средняяЦенаCol, текущаяЦенаCol, ценаCol];
+  const priceFmtCols = [средняяЦенаCol, текущаяЦенаCol, ценаCol, срКгCol, текКгCol, ценаКгCol, ручЦенаCol, ручКгCol];
   for (let i = 0; i < priceFmtCols.length; i++) {
     const col = priceFmtCols[i];
     if (col !== -1 && col <= lastCol && lastRow >= 4) {
@@ -2106,6 +2459,21 @@ function formatCurrentSheet(optSheet) {
         .setBackground("#ff0000")
         .setFontColor("#000000")
         .setRanges([range])
+        .build()
+    );
+  }
+
+  if (текКгCol !== -1 && ценаКгCol !== -1 && lastRow >= dataStartRow) {
+    const curKgLet = columnToLetter(текКгCol);
+    const manKgLet = columnToLetter(ценаКгCol);
+    const kgRange = sheet.getRange(dataStartRow, текКгCol, lastRow - dataStartRow + 1, 1);
+    const kgFormula = '=AND(' + curKgLet + dataStartRow + '<>"";' + curKgLet + dataStartRow + '<' + manKgLet + dataStartRow + ')';
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(kgFormula)
+        .setBackground("#ff0000")
+        .setFontColor("#000000")
+        .setRanges([kgRange])
         .build()
     );
   }

@@ -189,14 +189,17 @@ function getSupplyDataByRegionWarehouse(supplyDateFrom, supplyDateTo) {
     if (header === 'Количество') quantityIndex = i;
   }
   const supplyFromTime = supplyDateFrom.getTime();
-  const supplyToTime = supplyDateTo.getTime();
+  const supplyToEnd = new Date(supplyDateTo.getTime());
+  supplyToEnd.setHours(23, 59, 59, 999);
+  const supplyToTime = supplyToEnd.getTime();
   const result = {};
   function parseDate(dateVal) {
+    if (typeof parseToJSDate === 'function') return parseToJSDate(dateVal);
     if (!dateVal) return null;
     if (dateVal instanceof Date) return dateVal;
     if (typeof dateVal === 'string') {
       const parts = dateVal.split('.');
-      if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]);
+      if (parts.length === 3) return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
     }
     return null;
   }
